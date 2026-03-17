@@ -3,10 +3,11 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"quantum-scanner/internal/core/scanner"
-	"quantum-scanner/internal/db"
-	"quantum-scanner/internal/models"
 	"sync"
+
+	"github.com/AkshatGupta15/RandomShit/backend/internal/core/scanner"
+	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
+	"github.com/AkshatGupta15/RandomShit/backend/internal/models"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -34,7 +35,7 @@ func StartPipeline(c *fiber.Ctx) error {
 	// 1. Create or Reset the Domain Record
 	var domain models.Domain
 	db.DB.Where("domain_name = ?", req.Domain).FirstOrCreate(&domain, models.Domain{DomainName: req.Domain})
-	
+
 	// Reset progress counters
 	db.DB.Model(&domain).Updates(map[string]interface{}{
 		"status":         "pending",
@@ -69,7 +70,7 @@ func StopPipeline(c *fiber.Ctx) error {
 	if cancelFunc, exists := ActiveScans.Load(domain.ID); exists {
 		cancelFunc.(context.CancelFunc)() // Fires the halt signal
 		ActiveScans.Delete(domain.ID)
-		
+
 		db.DB.Model(&domain).Update("status", "halted")
 		return c.JSON(fiber.Map{"message": "Pipeline halted successfully"})
 	}

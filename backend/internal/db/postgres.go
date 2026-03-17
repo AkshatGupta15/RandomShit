@@ -2,8 +2,9 @@ package db
 
 import (
 	"log"
-	"quantum-scanner/internal/models"
-	
+
+	"github.com/AkshatGupta15/RandomShit/backend/internal/models"
+
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -13,7 +14,7 @@ var DB *gorm.DB
 
 func ConnectDatabase(dsn string) {
 	var err error
-	
+
 	// Configure GORM to log SQL queries during development
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
@@ -34,6 +35,6 @@ func ConnectDatabase(dsn string) {
 	if err != nil {
 		log.Fatal("Failed to migrate database schemas:", err)
 	}
-	
+
 	log.Println("✅ Enterprise ASM Schemas Migrated Successfully")
 }

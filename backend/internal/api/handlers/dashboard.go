@@ -1,9 +1,10 @@
 package handlers
 
 import (
-	"quantum-scanner/internal/db"
-	"quantum-scanner/internal/models"
 	"time"
+
+	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
+	"github.com/AkshatGupta15/RandomShit/backend/internal/models"
 
 	"github.com/gofiber/fiber/v2"
 )

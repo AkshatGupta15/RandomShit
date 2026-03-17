@@ -3,10 +3,11 @@ package scanner
 import (
 	"context"
 	"fmt"
-	"quantum-scanner/internal/db"
-	"quantum-scanner/internal/models"
 	"sync"
 	"time"
+
+	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
+	"github.com/AkshatGupta15/RandomShit/backend/internal/models"
 
 	"gorm.io/gorm"
 )

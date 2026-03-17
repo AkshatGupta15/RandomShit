@@ -1,4 +1,4 @@
-module quantum-scanner
+module github.com/AkshatGupta15/RandomShit/backend
 
 go 1.25.1
 

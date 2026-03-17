@@ -8,7 +8,7 @@ import (
 
 	// IMPORTANT: Update this import path to match your go.mod module name
 	// If your go.mod says "module pnb-hackathon", change this to "pnb-hackathon/internal/models"
-	"quantum-scanner/internal/models"
+	"github.com/AkshatGupta15/RandomShit/backend/internal/models"
 )
 
 // determinePQCTier grades the Post-Quantum Cryptography readiness
