@@ -8,7 +8,7 @@ import { AppSidebar } from '@/components/layout/app-sidebar'
 import { useAuth } from '@/contexts/auth-context'
 import { Spinner } from '@/components/ui/spinner'
 import { Separator } from '@/components/ui/separator'
-
+import { Toaster } from "sonner"
 export default function DashboardLayout({
   children,
 }: {
@@ -39,6 +39,7 @@ export default function DashboardLayout({
   }
 
   return (
+    <>
     <SidebarProvider defaultOpen>
       <AppSidebar />
       <SidebarInset className="bg-background">
@@ -73,5 +74,7 @@ export default function DashboardLayout({
         </main>
       </SidebarInset>
     </SidebarProvider>
+    <Toaster position="top-right" richColors />
+    </>
   )
 }

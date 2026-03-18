@@ -35,10 +35,59 @@ interface PaginatedResponse<T> {
   }
 }
 
+type ApiErrorPayload = {
+  message?: unknown
+  error?: unknown
+  details?: unknown
+}
+
+function extractErrorMessage(payload: ApiErrorPayload | null, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback
+
+  const directMessage = payload.message
+  if (typeof directMessage === 'string' && directMessage.trim()) {
+    return directMessage.trim()
+  }
+
+  const directError = payload.error
+  if (typeof directError === 'string' && directError.trim()) {
+    return directError.trim()
+  }
+
+  if (directError && typeof directError === 'object') {
+    const nestedMessage = (directError as { message?: unknown }).message
+    if (typeof nestedMessage === 'string' && nestedMessage.trim()) {
+      return nestedMessage.trim()
+    }
+  }
+
+  if (Array.isArray(payload.details) && payload.details.length > 0) {
+    const firstDetail = payload.details[0]
+    if (typeof firstDetail === 'string' && firstDetail.trim()) {
+      return firstDetail.trim()
+    }
+  }
+
+  return fallback
+}
+
+function showErrorToast(message: string) {
+  if (typeof window === 'undefined') return
+
+  void import('sonner')
+    .then(({ toast }) => {
+      toast.error(message)
+    })
+    .catch(() => {
+      // Ignore toast rendering failures
+    })
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message)
     this.name = 'ApiError'
+    showErrorToast(message)
   }
 }
 
@@ -79,8 +128,30 @@ async function fetchWithTimeout(url: string, options: FetchOptions = {}): Promis
     return response
   } catch (error) {
     clearTimeout(id)
-    throw error
+
+    if (error instanceof ApiError) {
+      throw error
+    }
+
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new ApiError(408, 'Request timed out. Please try again.')
+    }
+
+    throw new ApiError(0, 'Unable to connect to the server. Please check your network and try again.')
   }
+}
+
+async function throwApiError(response: Response, fallbackMessage: string): Promise<never> {
+  let payload: ApiErrorPayload | null = null
+
+  try {
+    payload = (await response.clone().json()) as ApiErrorPayload
+  } catch {
+    payload = null
+  }
+
+  const message = extractErrorMessage(payload, fallbackMessage)
+  throw new ApiError(response.status, message)
 }
 
 export const api = {
@@ -97,7 +168,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     })
-    if (!res.ok) throw new ApiError(res.status, 'Login failed')
+    if (!res.ok) {
+      await throwApiError(res, 'Login failed')
+    }
 
     const data = await res.json()
 
@@ -116,7 +189,7 @@ export const api = {
     const res = await fetchWithTimeout(`${API_BASE_URL}/auth/logout`, {
       method: 'POST',
     })
-    if (!res.ok) throw new ApiError(res.status, 'Logout failed')
+    if (!res.ok) await throwApiError(res, 'Logout failed')
     return res.json()
   },
 
@@ -130,7 +203,7 @@ export const api = {
       throw new ApiError(401, 'No session')
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/auth/me`)
-    if (!res.ok) throw new ApiError(res.status, 'Session invalid')
+    if (!res.ok) await throwApiError(res, 'Session invalid')
     return res.json()
   },
 
@@ -146,7 +219,7 @@ export const api = {
         return { data, pagination: { total: data.length, page: 1, limit: 10, totalPages: 1 } }
       }
       const res = await fetchWithTimeout(`${API_BASE_URL}/domains${buildQueryString(params)}`)
-      if (!res.ok) throw new ApiError(res.status, 'Failed to fetch domains')
+      if (!res.ok) await throwApiError(res, 'Failed to fetch domains')
       const payload = await res.json()
 
       const normalizedData = Array.isArray(payload?.domains)
@@ -207,21 +280,12 @@ export const api = {
         return { success: true, data: newDomain }
       }
       const res = await fetchWithTimeout(`${API_BASE_URL}/domains`, {
-        method: 'POST',
-        body: JSON.stringify({ domain }),
-      })
-      if (!res.ok) throw new ApiError(res.status, 'Failed to add domain')
-      const data = await res.json()
+    method: 'POST',
+    body: JSON.stringify({ domain }),
+  })
 
-return {
-  data: data.domains,
-  pagination: {
-    total: data.count,
-    page: 1,
-    limit: data.domains.length,
-    totalPages: 1,
-  },
-}
+  if (!res.ok) await throwApiError(res, 'Failed to add domain')
+  return res.json()
     },
     async delete(id: number) {
       if (IS_DEMO_MODE) {
@@ -233,7 +297,7 @@ return {
       const res = await fetchWithTimeout(`${API_BASE_URL}/domains/${id}`, {
         method: 'DELETE',
       })
-      if (!res.ok) throw new ApiError(res.status, 'Failed to delete domain')
+      if (!res.ok) await throwApiError(res, 'Failed to delete domain')
       return res.json()
     },
   },
@@ -250,7 +314,7 @@ return {
         return { data, pagination: { total: data.length, page: 1, limit: 10, totalPages: 1 } }
       }
       const res = await fetchWithTimeout(`${API_BASE_URL}/ssl${buildQueryString(params)}`)
-      if (!res.ok) throw new ApiError(res.status, 'Failed to fetch SSL certificates')
+      if (!res.ok) await throwApiError(res, 'Failed to fetch SSL certificates')
       return res.json()
     },
     async add(data: { domain: string; certificate: string }) {
@@ -262,7 +326,7 @@ return {
         method: 'POST',
         body: JSON.stringify(data),
       })
-      if (!res.ok) throw new ApiError(res.status, 'Failed to add certificate')
+      if (!res.ok) await throwApiError(res, 'Failed to add certificate')
       return res.json()
     },
     async delete(id: number) {
@@ -273,7 +337,7 @@ return {
       const res = await fetchWithTimeout(`${API_BASE_URL}/ssl/${id}`, {
         method: 'DELETE',
       })
-      if (!res.ok) throw new ApiError(res.status, 'Failed to delete certificate')
+      if (!res.ok) await throwApiError(res, 'Failed to delete certificate')
       return res.json()
     },
   },
@@ -290,7 +354,7 @@ return {
         return { data, pagination: { total: data.length, page: 1, limit: 10, totalPages: 1 } }
       }
       const res = await fetchWithTimeout(`${API_BASE_URL}/ips${buildQueryString(params)}`)
-      if (!res.ok) throw new ApiError(res.status, 'Failed to fetch IP addresses')
+      if (!res.ok) await throwApiError(res, 'Failed to fetch IP addresses')
       return res.json()
     },
     async add(data: { ip: string; subnet?: string; description?: string }) {
@@ -302,7 +366,7 @@ return {
         method: 'POST',
         body: JSON.stringify(data),
       })
-      if (!res.ok) throw new ApiError(res.status, 'Failed to add IP address')
+      if (!res.ok) await throwApiError(res, 'Failed to add IP address')
       return res.json()
     },
     async delete(id: number) {
@@ -313,7 +377,7 @@ return {
       const res = await fetchWithTimeout(`${API_BASE_URL}/ips/${id}`, {
         method: 'DELETE',
       })
-      if (!res.ok) throw new ApiError(res.status, 'Failed to delete IP address')
+      if (!res.ok) await throwApiError(res, 'Failed to delete IP address')
       return res.json()
     },
   },
@@ -330,7 +394,7 @@ return {
         return { data, pagination: { total: data.length, page: 1, limit: 10, totalPages: 1 } }
       }
       const res = await fetchWithTimeout(`${API_BASE_URL}/software${buildQueryString(params)}`)
-      if (!res.ok) throw new ApiError(res.status, 'Failed to fetch software')
+      if (!res.ok) await throwApiError(res, 'Failed to fetch software')
       return res.json()
     },
     async add(data: { name: string; version: string; vendor?: string }) {
@@ -342,7 +406,7 @@ return {
         method: 'POST',
         body: JSON.stringify(data),
       })
-      if (!res.ok) throw new ApiError(res.status, 'Failed to add software')
+      if (!res.ok) await throwApiError(res, 'Failed to add software')
       return res.json()
     },
     async delete(id: number) {
@@ -353,7 +417,7 @@ return {
       const res = await fetchWithTimeout(`${API_BASE_URL}/software/${id}`, {
         method: 'DELETE',
       })
-      if (!res.ok) throw new ApiError(res.status, 'Failed to delete software')
+      if (!res.ok) await throwApiError(res, 'Failed to delete software')
       return res.json()
     },
   },
@@ -368,7 +432,7 @@ return {
       method: 'POST',
       body: JSON.stringify({ domain_id: domainId }),
     })
-    if (!res.ok) throw new ApiError(res.status, 'Failed to start scan')
+    if (!res.ok) await throwApiError(res, 'Failed to start scan')
     return res.json()
   },
 
@@ -378,7 +442,7 @@ return {
       return { ...mockData.mockScanProgress, domainId }
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/scan/status/${domainId}`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to get scan status')
+    if (!res.ok) await throwApiError(res, 'Failed to get scan status')
     return res.json()
   },
 
@@ -390,7 +454,7 @@ return {
     const res = await fetchWithTimeout(`${API_BASE_URL}/scan/stop/${domainId}`, {
       method: 'POST',
     })
-    if (!res.ok) throw new ApiError(res.status, 'Failed to stop scan')
+    if (!res.ok) await throwApiError(res, 'Failed to stop scan')
     return res.json()
   },
 
@@ -406,7 +470,7 @@ return {
       }
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/ui/assets`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to fetch assets')
+    if (!res.ok) await throwApiError(res, 'Failed to fetch assets')
     return res.json()
   },
 
@@ -417,7 +481,7 @@ return {
       return { data: mockData.mockQuantumReadyAssets }
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/crypto/quantum-ready`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to fetch quantum-ready assets')
+    if (!res.ok) await throwApiError(res, 'Failed to fetch quantum-ready assets')
     return res.json()
   },
 
@@ -427,7 +491,7 @@ return {
       return { data: mockData.mockVulnerableAssets }
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/crypto/vulnerabilities`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to fetch vulnerable assets')
+    if (!res.ok) await throwApiError(res, 'Failed to fetch vulnerable assets')
     return res.json()
   },
 
@@ -438,7 +502,7 @@ return {
       return mockData.mockKPIs
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/dashboard/kpis`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to fetch KPIs')
+    if (!res.ok) await throwApiError(res, 'Failed to fetch KPIs')
     return res.json()
   },
 
@@ -448,7 +512,7 @@ return {
       return { data: mockData.mockRiskDistribution }
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/dashboard/charts/risk`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to fetch risk chart')
+    if (!res.ok) await throwApiError(res, 'Failed to fetch risk chart')
     return res.json()
   },
 
@@ -458,7 +522,7 @@ return {
       return { data: mockData.mockExpiryTimeline }
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/dashboard/charts/expiry`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to fetch expiry chart')
+    if (!res.ok) await throwApiError(res, 'Failed to fetch expiry chart')
     return res.json()
   },
 
@@ -469,7 +533,7 @@ return {
       return mockData.mockEngineStatus
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/system/engine-status`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to fetch engine status')
+    if (!res.ok) await throwApiError(res, 'Failed to fetch engine status')
     return res.json()
   },
 
@@ -479,7 +543,7 @@ return {
       return mockData.mockScannerSettings
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/settings/scanner-rules`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to fetch settings')
+    if (!res.ok) await throwApiError(res, 'Failed to fetch settings')
     return res.json()
   },
 
@@ -493,7 +557,7 @@ return {
       method: 'PUT',
       body: JSON.stringify(settings),
     })
-    if (!res.ok) throw new ApiError(res.status, 'Failed to update settings')
+    if (!res.ok) await throwApiError(res, 'Failed to update settings')
     return res.json()
   },
 
@@ -522,7 +586,7 @@ return {
       }
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/export/cbom/${domainId}`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to download CBOM')
+    if (!res.ok) await throwApiError(res, 'Failed to download CBOM')
     return res.json()
   },
 
@@ -532,7 +596,7 @@ return {
       return `PNB Quantum Shield Security Report\nDomain ID: ${domainId}\nGenerated: ${new Date().toISOString()}\n\nThis is a demo report.`
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/export/pdf-report/${domainId}`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to download report')
+    if (!res.ok) await throwApiError(res, 'Failed to download report')
     return res.text()
   },
 
@@ -543,7 +607,7 @@ return {
       return { data: mockData.mockDiscoveryFeed }
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/scan/discovery-feed`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to fetch discovery feed')
+    if (!res.ok) await throwApiError(res, 'Failed to fetch discovery feed')
     return res.json()
   },
 
@@ -557,7 +621,7 @@ return {
       method: 'POST',
       body: JSON.stringify(data),
     })
-    if (!res.ok) throw new ApiError(res.status, 'Failed to create schedule')
+    if (!res.ok) await throwApiError(res, 'Failed to create schedule')
     return res.json()
   },
 
@@ -572,7 +636,7 @@ return {
       }
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/scan/diff?old_scan_id=${oldScanId}&new_scan_id=${newScanId}`)
-    if (!res.ok) throw new ApiError(res.status, 'Failed to get scan diff')
+    if (!res.ok) await throwApiError(res, 'Failed to get scan diff')
     return res.json()
   },
 
@@ -586,7 +650,7 @@ return {
       method: 'POST',
       body: JSON.stringify(data),
     })
-    if (!res.ok) throw new ApiError(res.status, 'Failed to create webhook')
+    if (!res.ok) await throwApiError(res, 'Failed to create webhook')
     return res.json()
   },
 

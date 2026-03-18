@@ -80,7 +80,7 @@ export default function DomainsPage() {
       setNewDomain('')
       setIsAddDialogOpen(false)
     } catch (err) {
-      console.error('Failed to add domain:', err)
+      console.error('Add Domain Error:', err)
     } finally {
       setIsAdding(false)
     }
