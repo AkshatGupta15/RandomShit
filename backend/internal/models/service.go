@@ -9,6 +9,9 @@ type Service struct {
 	ID          uint   `gorm:"primaryKey" json:"id"`
 	SubdomainID uint   `gorm:"index;not null" json:"subdomain_id"`
 	
+	// ⬇️ THE FIX: This tells GORM how to Preload the parent data ⬇️
+	Subdomain   *Subdomain `gorm:"foreignKey:SubdomainID" json:"subdomain,omitempty"`
+	
 	Port        int    `gorm:"not null" json:"port"`       // e.g., 80, 443, 8443
 	Protocol    string `gorm:"default:'tcp'" json:"protocol"`
 	

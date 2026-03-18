@@ -1,49 +1,35 @@
+// cmd/api/main.go
 package main
 
 import (
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/AkshatGupta15/RandomShit/backend/internal/api"
 	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
 func main() {
-	// ---------- Database ----------
-	if err := db.Connect(); err != nil {
-		log.Fatal("Failed to connect to database:", err)
-	}
-	log.Println("Database connected")
+	// 1. Connect DB
+	db.ConnectDatabase("postgres://postgres:password@localhost:5432/postgres?sslmode=disable")
 
-	// ---------- Fiber App ----------
-	app := fiber.New(fiber.Config{
-		AppName: "Quantum-Proof Enterprise Portal",
-	})
-
-	// Middleware
+	// 2. Setup Fiber
+	app := fiber.New()
 	app.Use(logger.New())
-	app.Use(recover.New())
-	app.Use(cors.New())
+	// app.Use(cors.New(cors.Config{AllowOrigins: "http://localhost:3000"}))
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     "http://localhost:3000",
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowCredentials: true,
+	}))
 
-	// ---------- Routes ----------
+	// 3. Register ALL Routes perfectly
 	api.SetupRoutes(app)
 
-	// ---------- Graceful Shutdown ----------
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		log.Println("Shutting down...")
-		db.Close()
-		app.Shutdown()
-	}()
-
-	// ---------- Start Server ----------
+	// 4. Listen
 	log.Fatal(app.Listen(":8080"))
 }

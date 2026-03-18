@@ -12,73 +12,89 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// ActiveScans holds the cancellation functions for running pipelines
+// ActiveScans acts as an in-memory registry for our kill switches
 var ActiveScans sync.Map
 
 type ScanRequest struct {
 	Domain string `json:"domain"`
 }
 
-// StartPipeline initiates the background worker
+// StartPipeline - POST /api/v1/scan/start
 func StartPipeline(c *fiber.Ctx) error {
 	var req ScanRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid payload"})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid JSON payload"})
 	}
 
+	if req.Domain == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Domain is required"})
+	}
+
+	// 1. Check if it's already running to prevent duplicate background workers
 	var existing models.Domain
 	db.DB.Where("domain_name = ? AND status = ?", req.Domain, "scanning").First(&existing)
 	if existing.ID != 0 {
-		return c.Status(409).JSON(fiber.Map{"error": "Scan already in progress"})
+		return c.Status(409).JSON(fiber.Map{"error": "Scan is already in progress for this domain"})
 	}
 
-	// 1. Create or Reset the Domain Record
+	// 2. Fetch or create the Domain in the database
 	var domain models.Domain
-	db.DB.Where("domain_name = ?", req.Domain).FirstOrCreate(&domain, models.Domain{DomainName: req.Domain})
+	db.DB.Where("domain_name = ?", req.Domain).FirstOrCreate(&domain, models.Domain{
+		DomainName: req.Domain,
+	})
 
-	// Reset progress counters
+	// 3. Reset progress trackers for a fresh scan
 	db.DB.Model(&domain).Updates(map[string]interface{}{
-		"status":         "pending",
+		"status":         "scanning",
 		"total_assets":   0,
 		"scanned_assets": 0,
 	})
 
-	// 2. Create a Cancellable Context
+	// 4. Create the Kill Switch (Cancellable Context)
 	ctx, cancel := context.WithCancel(context.Background())
 	ActiveScans.Store(domain.ID, cancel)
 
-	// 3. Fire the worker, passing the Context
+	// 5. Fire the background pipeline
+	// Notice we pass the 'ctx' so the pipeline knows when to stop
 	go scanner.RunEnterprisePipeline(ctx, domain.ID, domain.DomainName)
 
 	return c.Status(202).JSON(fiber.Map{
-		"message":   "Pipeline started",
+		"message":   "Pipeline initiated successfully in the background",
 		"domain_id": domain.ID,
+		"status":    "scanning",
 	})
 }
 
-// StopPipeline acts as an emergency halt
+// StopPipeline - POST /api/v1/scan/stop/:domainId
 func StopPipeline(c *fiber.Ctx) error {
 	domainID := c.Params("domainId")
 
-	// 1. Fetch the domain
+	// 1. Verify the domain exists
 	var domain models.Domain
 	if err := db.DB.First(&domain, domainID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "Domain not found"})
+		return c.Status(404).JSON(fiber.Map{"error": "Domain not found in database"})
 	}
 
-	// 2. Look for the active context and trigger cancellation
-	if cancelFunc, exists := ActiveScans.Load(domain.ID); exists {
-		cancelFunc.(context.CancelFunc)() // Fires the halt signal
-		ActiveScans.Delete(domain.ID)
-
-		db.DB.Model(&domain).Update("status", "halted")
-		return c.JSON(fiber.Map{"message": "Pipeline halted successfully"})
+	// 2. Look for the active kill switch in our sync.Map
+	cancelFunc, exists := ActiveScans.Load(domain.ID)
+	if !exists {
+		return c.Status(400).JSON(fiber.Map{"error": "No active scan found for this domain to halt"})
 	}
 
-	return c.Status(400).JSON(fiber.Map{"error": "No active scan found for this domain"})
+	// 3. Pull the trigger to terminate the goroutine
+	cancelFunc.(context.CancelFunc)()
+	ActiveScans.Delete(domain.ID)
+
+	// 4. Update the database to reflect the halt
+	db.DB.Model(&domain).Update("status", "halted")
+
+	return c.JSON(fiber.Map{
+		"message": "Pipeline halted successfully. Background worker terminated.",
+		"status":  "halted",
+	})
 }
 
-// GetScanProgress calculates real-time completion percentage
+// GetScanProgress - GET /api/v1/scan/status/:domainId
 func GetScanProgress(c *fiber.Ctx) error {
 	domainID := c.Params("domainId")
 
@@ -87,22 +103,20 @@ func GetScanProgress(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "Domain not found"})
 	}
 
-	// Calculate percentage
+	// Calculate the exact percentage safely
 	percentage := 0.0
 	if domain.TotalAssets > 0 {
 		percentage = (float64(domain.ScannedAssets) / float64(domain.TotalAssets)) * 100
-	}
-
-	// If discovery hasn't finished yet but scan is running
-	if domain.Status == "scanning" && domain.TotalAssets == 0 {
-		percentage = 5.0 // Fake 5% while crt.sh does discovery
-	}
-	if domain.Status == "completed" {
+	} else if domain.Status == "scanning" {
+		// If it's scanning but total_assets is 0, we are still in the DNS discovery phase
+		percentage = 5.0
+	} else if domain.Status == "completed" {
 		percentage = 100.0
 	}
 
 	return c.JSON(fiber.Map{
 		"domain_id":      domain.ID,
+		"domain_name":    domain.DomainName,
 		"status":         domain.Status,
 		"total_assets":   domain.TotalAssets,
 		"scanned_assets": domain.ScannedAssets,

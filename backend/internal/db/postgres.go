@@ -31,6 +31,8 @@ func ConnectDatabase(dsn string) {
 		&models.Subdomain{},
 		&models.Service{},
 		&models.SSLCertificate{},
+		&models.SystemSetting{},
+		&models.User{},
 	)
 	if err != nil {
 		log.Fatal("Failed to migrate database schemas:", err)

@@ -1,0 +1,56 @@
+[00:02:42.187] Server  ERROR   ⨯ Error: Cannot find module 'next/dist/client/components/builtin/global-not-found'
+Require stack:
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/on-demand-entry-handler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/hot-reloader-turbopack.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-server.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/start-server.js
+[00:02:42.210] Server  ERROR   Error: Cannot find module 'next/dist/pages/_error'
+Require stack:
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/on-demand-entry-handler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/hot-reloader-turbopack.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-server.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/start-server.js
+[00:02:42.241] Server  ERROR   ⨯ Error: Cannot find module 'next/dist/pages/_error'
+Require stack:
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/on-demand-entry-handler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/hot-reloader-turbopack.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-server.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/start-server.js
+[00:02:42.279] Server  ERROR   Error: Cannot find module 'next/dist/pages/_error'
+Require stack:
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/on-demand-entry-handler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/hot-reloader-turbopack.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-server.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/start-server.js
+[00:02:42.435] Server  ERROR   ⨯ Error: Cannot find module 'next/dist/client/components/builtin/global-not-found'
+Require stack:
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/on-demand-entry-handler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/hot-reloader-turbopack.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-server.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/start-server.js
+[00:02:42.459] Server  ERROR   Error: Cannot find module 'next/dist/pages/_error'
+Require stack:
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/on-demand-entry-handler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/hot-reloader-turbopack.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-server.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/start-server.js
+[00:02:42.485] Server  ERROR   ⨯ Error: Cannot find module 'next/dist/pages/_error'
+Require stack:
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/on-demand-entry-handler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/hot-reloader-turbopack.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-server.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/start-server.js
+[00:02:42.509] Server  ERROR   Error: Cannot find module 'next/dist/pages/_error'
+Require stack:
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/on-demand-entry-handler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/dev/hot-reloader-turbopack.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/router-server.js
+- /Users/akshat./codes/PNB_Hackathon/vo_v2/node_modules/next/dist/server/lib/start-server.js
