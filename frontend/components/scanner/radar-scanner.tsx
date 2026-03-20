@@ -9,7 +9,15 @@ interface RadarScannerProps {
   className?: string
 }
 
+function normalizeProgress(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.min(100, Math.max(0, parsed))
+}
+
 export function RadarScanner({ isScanning, progress, className }: RadarScannerProps) {
+  const safeProgress = normalizeProgress(progress)
+
   return (
     <div className={cn('relative', className)}>
       {/* Radar container */}
@@ -103,7 +111,7 @@ export function RadarScanner({ isScanning, progress, className }: RadarScannerPr
       <div className="mt-6 max-w-xs mx-auto">
         <div className="flex justify-between text-sm mb-2">
           <span className="text-muted-foreground">Scan Progress</span>
-          <span className="text-pnb-gold font-mono">{progress.toFixed(1)}%</span>
+          <span className="text-pnb-gold font-mono">{safeProgress.toFixed(1)}%</span>
         </div>
         <div className="h-2 bg-secondary rounded-full overflow-hidden">
           <motion.div
@@ -112,7 +120,7 @@ export function RadarScanner({ isScanning, progress, className }: RadarScannerPr
               background: 'linear-gradient(90deg, oklch(0.35 0.12 15), oklch(0.85 0.15 85))',
             }}
             initial={{ width: 0 }}
-            animate={{ width: `${progress}%` }}
+            animate={{ width: `${safeProgress}%` }}
             transition={{ duration: 0.3, ease: 'easeOut' }}
           />
         </div>
@@ -156,6 +164,8 @@ export function ScanProgress({
   totalAssets: number
   className?: string
 }) {
+  const safeProgress = normalizeProgress(progress)
+
   return (
     <div className={cn('space-y-3', className)}>
       {/* Main progress bar */}
@@ -176,7 +186,7 @@ export function ScanProgress({
             background: 'linear-gradient(90deg, oklch(0.35 0.12 15), oklch(0.5 0.15 15), oklch(0.85 0.15 85))',
           }}
           initial={{ width: 0 }}
-          animate={{ width: `${progress}%` }}
+          animate={{ width: `${safeProgress}%` }}
           transition={{ duration: 0.5, ease: 'easeOut' }}
         >
           {/* Shimmer effect */}
@@ -202,7 +212,7 @@ export function ScanProgress({
             Scanning: <span className="text-foreground font-mono">{scannedAssets}</span> / {totalAssets} assets
           </span>
         </div>
-        <span className="font-mono text-pnb-gold">{progress.toFixed(1)}%</span>
+        <span className="font-mono text-pnb-gold">{safeProgress.toFixed(1)}%</span>
       </div>
     </div>
   )

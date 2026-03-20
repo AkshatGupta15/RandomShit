@@ -57,6 +57,11 @@ interface DiscoveredAsset {
   timestamp: Date
 }
 
+function toNumber(value: unknown, fallback = 0): number {
+  const num = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(num) ? num : fallback
+}
+
 export default function ScannerPage() {
   const [selectedDomainId, setSelectedDomainId] = useState<number | null>(null)
   const [scanStatus, setScanStatus] = useState<ScanStatus>({
@@ -83,11 +88,16 @@ export default function ScannerPage() {
 
     try {
       const status = await api.getScanStatus(selectedDomainId)
+
+      const percentage = toNumber((status as { percentage?: unknown; progress?: unknown }).percentage ?? (status as { percentage?: unknown; progress?: unknown }).progress, 0)
+      const scannedAssets = toNumber((status as { scanned_assets?: unknown; scannedEndpoints?: unknown; discoveredEndpoints?: unknown }).scanned_assets ?? (status as { scanned_assets?: unknown; scannedEndpoints?: unknown; discoveredEndpoints?: unknown }).scannedEndpoints ?? (status as { scanned_assets?: unknown; scannedEndpoints?: unknown; discoveredEndpoints?: unknown }).discoveredEndpoints, 0)
+      const totalAssets = toNumber((status as { total_assets?: unknown; totalEndpoints?: unknown }).total_assets ?? (status as { total_assets?: unknown; totalEndpoints?: unknown }).totalEndpoints, 0)
+
       setScanStatus({
-        status: status.status === 'completed' ? 'completed' : 'scanning',
-        percentage: status.percentage,
-        scanned_assets: status.scanned_assets,
-        total_assets: status.total_assets,
+        status: (status as { status?: string }).status === 'completed' ? 'completed' : 'scanning',
+        percentage,
+        scanned_assets: scannedAssets,
+        total_assets: totalAssets,
       })
 
       // Simulate discovering assets
@@ -104,7 +114,7 @@ export default function ScannerPage() {
         setDiscoveredAssets(prev => [newAsset, ...prev].slice(0, 10))
       }
 
-      if (status.status === 'completed' || status.percentage >= 100) {
+      if ((status as { status?: string }).status === 'completed' || percentage >= 100) {
         setScanStatus(prev => ({ ...prev, status: 'completed' }))
       }
     } catch (error) {

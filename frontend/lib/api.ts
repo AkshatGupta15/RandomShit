@@ -38,11 +38,17 @@ interface PaginatedResponse<T> {
 type ApiErrorPayload = {
   message?: unknown
   error?: unknown
+  msg?: unknown
   details?: unknown
 }
 
 function extractErrorMessage(payload: ApiErrorPayload | null, fallback: string): string {
   if (!payload || typeof payload !== 'object') return fallback
+
+  const directMsg = payload.msg
+  if (typeof directMsg === 'string' && directMsg.trim()) {
+    return directMsg.trim()
+  }
 
   const directMessage = payload.message
   if (typeof directMessage === 'string' && directMessage.trim()) {
@@ -143,6 +149,7 @@ async function fetchWithTimeout(url: string, options: FetchOptions = {}): Promis
 
 async function throwApiError(response: Response, fallbackMessage: string): Promise<never> {
   let payload: ApiErrorPayload | null = null
+  let textPayload = ''
 
   try {
     payload = (await response.clone().json()) as ApiErrorPayload
@@ -150,7 +157,19 @@ async function throwApiError(response: Response, fallbackMessage: string): Promi
     payload = null
   }
 
-  const message = extractErrorMessage(payload, fallbackMessage)
+  if (!payload) {
+    try {
+      textPayload = (await response.clone().text()).trim()
+      if (textPayload.startsWith('{') || textPayload.startsWith('[')) {
+        const parsed = JSON.parse(textPayload) as ApiErrorPayload
+        payload = parsed
+      }
+    } catch {
+      textPayload = ''
+    }
+  }
+
+  const message = extractErrorMessage(payload, textPayload || fallbackMessage)
   throw new ApiError(response.status, message)
 }
 

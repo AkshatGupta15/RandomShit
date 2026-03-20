@@ -52,7 +52,10 @@ func AddRootDomain(c *fiber.Ctx) error {
 	var existing models.Domain
 	db.DB.Where("domain_name = ?", cleanDomain).First(&existing)
 	if existing.ID != 0 {
-		return c.Status(409).JSON(fiber.Map{"error": "Domain is already being tracked"})
+		return c.JSON(fiber.Map{
+			"message": "Domain is already being tracked",
+			"domain":  existing,
+		})
 	}
 
 	// Save to database with 'pending' status

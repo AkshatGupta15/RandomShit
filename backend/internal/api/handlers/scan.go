@@ -16,7 +16,7 @@ import (
 var ActiveScans sync.Map
 
 type ScanRequest struct {
-	Domain string `json:"domain"`
+	DomainID uint `json:"domain_id"`
 }
 
 // StartPipeline - POST /api/v1/scan/start
@@ -26,35 +26,35 @@ func StartPipeline(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid JSON payload"})
 	}
 
-	if req.Domain == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "Domain is required"})
+	if req.DomainID == 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "domain_id is required"})
+	}
+
+	var domain models.Domain
+	// Fetch domain by ID
+	if err := db.DB.First(&domain, req.DomainID).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "Domain not found"})
 	}
 
 	// 1. Check if it's already running to prevent duplicate background workers
-	var existing models.Domain
-	db.DB.Where("domain_name = ? AND status = ?", req.Domain, "scanning").First(&existing)
-	if existing.ID != 0 {
-		return c.Status(409).JSON(fiber.Map{"error": "Scan is already in progress for this domain"})
+	if domain.Status == "scanning" {
+		return c.Status(409).JSON(fiber.Map{
+			"error": "Scan is already in progress for this domain",
+		})
 	}
 
-	// 2. Fetch or create the Domain in the database
-	var domain models.Domain
-	db.DB.Where("domain_name = ?", req.Domain).FirstOrCreate(&domain, models.Domain{
-		DomainName: req.Domain,
-	})
-
-	// 3. Reset progress trackers for a fresh scan
+	// 2. Reset progress trackers for a fresh scan
 	db.DB.Model(&domain).Updates(map[string]interface{}{
 		"status":         "scanning",
 		"total_assets":   0,
 		"scanned_assets": 0,
 	})
 
-	// 4. Create the Kill Switch (Cancellable Context)
+	// 3. Create the Kill Switch (Cancellable Context)
 	ctx, cancel := context.WithCancel(context.Background())
 	ActiveScans.Store(domain.ID, cancel)
 
-	// 5. Fire the background pipeline
+	// 4. Fire the background pipeline
 	// Notice we pass the 'ctx' so the pipeline knows when to stop
 	go scanner.RunEnterprisePipeline(ctx, domain.ID, domain.DomainName)
 
