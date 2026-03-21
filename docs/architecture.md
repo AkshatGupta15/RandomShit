@@ -137,18 +137,21 @@ Rather than exporting a generic CSV file, PNB Quantum Shield programmatically ge
 
 ---
 
-## 5. Contextual AI Integration (Gemini 1.5 Flash)
+## 5. Contextual AI Integration (Groq LLaMA 3.3)  
 *Automating the CISO Executive Summary.*
 
-**The Problem:** Non-technical executives and board members cannot read JSON files or parse raw TLS 1.3 metrics. They need strategic insights.
+**The Problem:** Non-technical executives and board members cannot read JSON files or parse raw TLS 1.3 metrics. They need strategic insights that translate technical risk into business language.
 
-**The Implementation:**
-We integrated the **Google Gemini API** directly into our PDF export pipeline. 
-* When a user requests an executive report, the Go backend aggregates the exact counts of total assets, NIST FIPS 203 (ML-KEM) compliant assets, and legacy assets.
-* It injects these raw metrics into a highly-tuned system prompt instructing Gemini to act as a PNB Cybersecurity Auditor.
-* Gemini processes the data and returns a contextual, 2-paragraph analysis regarding the specific HNDL risks present in the scan, which is instantly embedded into a print-optimized, white-labeled HTML/PDF report. 
+**The Implementation:**  
+We integrated the **Groq API** (using the high‑performance **LLaMA 3.3 70B** model) directly into our PDF export pipeline. Groq’s LPU architecture delivers near‑instant inference, ensuring the executive summary is generated without delaying the report.  
+* When a user requests an executive report, the Go backend aggregates the exact counts of total assets, NIST FIPS 203 (ML‑KEM) compliant assets, and legacy assets.  
+* It injects these raw metrics into a highly‑tuned system prompt that instructs the model to act as a PNB Cybersecurity Auditor, writing in a formal, authoritative banking tone.  
+* The model returns a contextual, two‑paragraph analysis focusing on “Harvest Now, Decrypt Later” (HNDL) risks, the urgency of migrating legacy assets, and the strategic compliance posture—all instantly embedded into a print‑optimized, white‑labeled HTML/PDF report.  
 
----
+**Why it wins:**  
+- **Cost‑effective:** Groq’s free tier provides ample daily requests for enterprise scanning.  
+- **Speed:** The model generates the summary in under a second, keeping the PDF export snappy.  
+- **Contextual relevance:** By feeding precise metrics (Elite/Standard/Legacy counts), the AI produces actionable insights, not generic platitudes, directly supporting PNB’s risk management decisions.
 
 ## 6. Zero-Trust API Security 
 *Securing the scanner against the very vulnerabilities it hunts.*

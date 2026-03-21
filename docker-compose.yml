@@ -1,14 +1,49 @@
 version: '3.8'
+
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pnb_postgres
+    environment:
+      POSTGRES_USER: pnb_user
+      POSTGRES_PASSWORD: pnb_password
+      POSTGRES_DB: pnb_quantum_shield
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pnb_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
-    build: 
-      context: ./backend
-      dockerfile: ../deploy/Dockerfile.backend
+    build: ./backend
+    container_name: pnb_backend
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: pnb_user
+      DB_PASSWORD: pnb_password
+      DB_NAME: pnb_quantum_shield
+      # Add any other required env vars (e.g., GROQ_API_KEY)
+      API_KEY: ${API_KEY}
     ports:
       - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: ../deploy/Dockerfile.frontend
+    build: ./frontend
+    container_name: pnb_frontend
     ports:
-      - "5173:5173"
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
