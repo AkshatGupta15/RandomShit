@@ -22,9 +22,9 @@ func main() {
 	if err != nil {
 		log.Println("No .env file found")
 	}
-	log.Println("DATABASE_URL:npg_B8hprRnI9FjX@ep-sparkling-waterfall-ak92cp6y-pooler.c-3.us-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require", os.Getenv("npg_B8hprRnI9FjX@ep-sparkling-waterfall-ak92cp6y-pooler.c-3.us-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require")) // debug
+	log.Println("DATABASE_URL:", os.Getenv("DATABASE_URL")) // debug
 	// Connect DB
-	db.ConnectDatabase(os.Getenv("npg_B8hprRnI9FjX@ep-sparkling-waterfall-ak92cp6y-pooler.c-3.us-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"))
+	db.ConnectDatabase(os.Getenv("DATABASE_URL"))
 	// 2. Setup Fiber
 	app := fiber.New()
 	app.Use(logger.New())
