@@ -73,7 +73,7 @@
 
 - [5. Enterprise Compliance & GRC](#5-enterprise-compliance--grc)
   - [5.1 CycloneDX 1.6 Cryptographic Bill of Materials (CBOM)](#51-cyclonedx-16-cryptographic-bill-of-materials-cbom)
-  - [5.2 Gemini 1.5 Flash AI Executive Summaries](#52-gemini-15-flash-ai-executive-summaries)
+  - [5.2 Groq LPU AI Executive Summaries](#52-groq-lpu-ai-executive-summaries)
   - [5.3 Print-Optimized Compliance PDF Generation](#53-print-optimized-compliance-pdf-generation)
 
 - [6. System Architecture & Diagrams](#6-system-architecture--diagrams)
@@ -83,11 +83,11 @@
   - [6.4 Relational Database Schema (PostgreSQL 16)](#64-relational-database-schema-postgresql-16)
 
 - [7. Software Requirements Specification (SRS)](#7-software-requirements-specification-srs)
-  - [7.1 Functional Requirements (FR-1 to FR-5)](#71-functional-requirements-fr-1-to-fr-5)
+  - [7.1 Functional Requirements (FR-1 to FR-6)](#71-functional-requirements-fr-1-to-fr-6)
   - [7.2 Performance Targets & Scalability Limitations](#72-performance-targets--scalability-limitations)
   - [7.3 Design & Implementation Constraints](#73-design--implementation-constraints)
 
-- [8. API Reference Guide](#8-api-reference-guide)
+- [8. REST API Reference Guide](#8-rest-api-reference-guide)
   - [8.1 Authentication & Session Management](#81-authentication--session-management)
   - [8.2 Target & Asset Management](#82-target--asset-management)
   - [8.3 Scanner Engine Controls](#83-scanner-engine-controls)
@@ -95,20 +95,18 @@
   - [8.5 Export & Attestation Endpoints](#85-export--attestation-endpoints)
 
 - [9. Project Structure & Code Organization](#9-project-structure--code-organization)
-  - [9.1 Backend Repository (Go Fiber)](#91-backend-repository-go-fiber)
-  - [9.2 Frontend Repository (Next.js / Shadcn)](#92-frontend-repository-nextjs--shadcn)
+  - [9.1 Backend Repository (Golang)](#91-backend-repository-golang)
+  - [9.2 Frontend Repository (Next.js / Shadcn UI)](#92-frontend-repository-nextjs--shadcn-ui)
 
 - [10. Quick Start & Deployment Guide](#10-quick-start--deployment-guide)
   - [10.1 Prerequisites & Environment Configuration](#101-prerequisites--environment-configuration)
-  - [10.2 Database Initialization & Seeding](#102-database-initialization--seeding)
-  - [10.3 Launching the High-Performance Go Engine](#103-launching-the-high-performance-go-engine)
-  - [10.4 Running the React Command Center](#104-running-the-react-command-center)
+  - [10.2 Backend Setup (Go / Postgres)](#102-backend-setup-go--postgres)
+  - [10.3 Frontend Setup (Next.js)](#103-frontend-setup-nextjs)
 
 - [11. Future Roadmap (Phase 2: Enterprise Automation)](#11-future-roadmap-phase-2-enterprise-automation)
   - [11.1 Continuous Drift Detection](#111-continuous-drift-detection)
-  - [11.2 CI/CD Webhook Integrations (Slack/Jira)](#112-cicd-webhook-integrations-slackjira)
-  - [11.3 Role-Based Access Control (RBAC)](#113-role-based-access-control-rbac)
-
+  - [11.2 CI/CD "Shift-Left" Integration (Slack/Jira)](#112-cicd-shift-left-integration-slackjira)
+  - [11.3 Enterprise Role-Based Access Control (RBAC)](#113-enterprise-role-based-access-control-rbac)
 ***
 
 ## 1. Project Overview & Vision
