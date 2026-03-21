@@ -13,7 +13,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 [**Explore the Architecture**](#6-system-architecture--diagrams) • 
-[**View API Docs**](#8-api-reference-guide) • 
+[**View API Docs**](#8-rest-api-reference-guide) • 
 [**Read the Math Engine**](#4-the-mathematical-risk-engine)
 
 </div>
@@ -272,31 +272,105 @@ To make the $X$ value (Shelf Life) dynamically accurate, our engine performs **H
 * Endpoints containing `api`, `pay`, `auth`, or `secure` are automatically assigned a high $X$ value (e.g., 15 years), ruthlessly penalizing legacy cryptography on transactional infrastructure.
 * Endpoints containing `blog`, `promo`, or `dev` are assigned a low $X$ value, preventing alert fatigue for the SOC team.
 
-***
 
-## 4. Enterprise Compliance & AI Reporting
+## 4\. The Mathematical Risk Engine
+
+Finding a legacy cryptographic asset is only step one. Generic scanners label old cryptography as "Vulnerable" without understanding the business context. A short-lived session token encrypted with RSA-2048 does not carry the same risk as a 30-year banking contract encrypted with the same algorithm.
+
+We codified **Mosca’s Theorem** directly into our Go pipeline to quantify risk contextually.
+
+### 4.1 Mosca’s Theorem of Quantum Risk (X + Y \> Z)
+
+The core of our mathematical engine evaluates the **"Harvest Now, Decrypt Later" (HNDL)** threat using the following inequality:
+
+> ### $X + Y > Z$
+>
+>   * **X (Shelf Life):** The duration for which the data must remain confidential (e.g., 10 years for financial records).
+>   * **Y (Migration Time):** The time required to inventory, test, and deploy PQC across the enterprise (e.g., 3 years).
+>   * **Z (Time to Collapse):** The years remaining until a CRQC (Cryptographically Relevant Quantum Computer) breaks the algorithm.
+>
+> **The Danger Zone:** If $(X + Y) > Z$, the enterprise has failed. Data currently traversing the network will be decrypted by adversaries before it loses its sensitivity value.
+
+### 4.2 Dynamic Q-Score Calculation & Weighting Matrix
+
+As the Goroutine swarm extracts TLS handshakes, the data is piped directly into our risk engine.
+
+```mermaid
+flowchart LR
+    subgraph Raw Extraction
+    A[TLS Version]
+    B[Cipher Suite]
+    C[Key Exchange]
+    D[Cert Expiry]
+    end
+
+    subgraph The Q-Engine
+    E((Base Weighting<br>Algorithm))
+    F{Mosca's<br>Inequality<br>Check}
+    end
+
+    subgraph Output
+    G[Final Q-Score<br>0 to 100]
+    H[Compliance Tier<br>Label]
+    end
+
+    A & B & C & D --> E
+    E --> F
+    F -- "Pass (X+Y < Z)" --> G
+    F -- "Fail (X+Y > Z)<br>Apply Severe Penalty" --> G
+    G --> H
+
+    style E fill:#475569,stroke:#94a3b8,color:#fff
+    style F fill:#800000,stroke:#ef4444,color:#fff
+    style G fill:#0f172a,stroke:#38bdf8,color:#fff
+    style H fill:#0f172a,stroke:#10b981,color:#fff
+```
+
+### 4.3 Enterprise Risk Classification Tiers
+
+Based on the final computed Q-Score, the Go backend classifies the asset into actionable tiers mapped directly to NIST mandates:
+
+| Q-Score Range | Status Label | Cryptographic Profile | Action Required |
+| :---: | :--- | :--- | :--- |
+| **80 - 100** | `FULLY_QUANTUM_SAFE` | TLS 1.3 + ML-KEM / Kyber Negotiation | **None.** Compliant with FIPS 203. |
+| **60 - 79** | `PQC_TRANSITION` | Hybrid Key Exchange or Strong Classical (ECDSA-384) | **Monitor.** Safe for short-lived data. |
+| **40 - 59** | `QUANTUM_VULNERABLE` | Standard RSA-2048 / ECDHE | **Plan & Pilot.** High risk for HNDL. |
+| **0 - 39** | `CRITICAL` | TLS 1.0/1.1, RSA-1024, Expired Certs | **Immediate Remediation.** |
+
+### 4.4 Heuristic Asset Criticality Routing
+
+To make the $X$ value (Shelf Life) dynamically accurate, our engine performs **Heuristic Pattern Matching** on the discovered hostnames.
+
+  * Endpoints containing `api`, `pay`, `auth`, or `secure` are automatically assigned a high $X$ value (e.g., 15 years), ruthlessly penalizing legacy cryptography on transactional infrastructure.
+  * Endpoints containing `blog`, `promo`, or `dev` are assigned a low $X$ value, preventing alert fatigue for the SOC team.
+
+-----
+
+## 5\. Enterprise Compliance & GRC
 
 Finding vulnerabilities is only half the battle. Enterprise banks operate under strict Governance, Risk, and Compliance (GRC) mandates. PNB Quantum Shield bridges the gap between deep technical engineering and C-suite reporting by automating compliance exports and integrating ultra-low latency AI for executive analysis.
 
-### 4.1 CycloneDX 1.6 Cryptographic Bill of Materials (CBOM)
+### 5.1 CycloneDX 1.6 Cryptographic Bill of Materials (CBOM)
 
-To prepare for impending regulatory frameworks (such as the Cyber Resilience Act and NSA CNSA 2.0 directives), enterprises must maintain a strict inventory of their cryptographic assets. 
+To prepare for impending regulatory frameworks (such as the Cyber Resilience Act and NSA CNSA 2.0 directives), enterprises must maintain a strict inventory of their cryptographic assets.
 
 Instead of exporting generic CSV files, our Go backend programmatically generates a **CycloneDX 1.6 CBOM**.
-* **The Mechanism:** When the `/api/v1/export/cbom/:id` endpoint is hit, the PostgreSQL database aggregates all TLS metadata and formats it strictly to the CycloneDX standard.
-* **The Value:** Assets are tagged with `cryptoProperties`, algorithms, and `NistFipsCompliant` booleans. This machine-readable JSON file can be instantly ingested into PNB's existing enterprise GRC platforms (e.g., ServiceNow, RSA Archer), transforming a hackathon scanner into an audit-ready compliance tool.
 
-### 4.2 Groq LPU AI Executive Summaries
+  * **The Mechanism:** When the `/api/v1/export/cbom/:id` endpoint is hit, the PostgreSQL database aggregates all TLS metadata and formats it strictly to the CycloneDX standard.
+  * **The Value:** Assets are tagged with `cryptoProperties`, algorithms, and `NistFipsCompliant` booleans. This machine-readable JSON file can be instantly ingested into PNB's existing enterprise GRC platforms (e.g., ServiceNow, RSA Archer), transforming a hackathon scanner into an audit-ready compliance tool.
+
+### 5.2 Groq LPU AI Executive Summaries
 
 Raw cryptographic metrics (e.g., "15 endpoints using RSA-1024") are meaningless to non-technical executives. We needed an AI to act as a "Virtual CISO" to translate these metrics into business risk.
 
 **The Architectural Pivot: Why Groq?**
-Standard LLM APIs (like OpenAI) suffer from high Time-To-First-Token (TTFT) latency, which ruins the UX of generating real-time PDF reports. We integrated the **Groq API**, leveraging their proprietary **Language Processing Units (LPUs)**. 
-* Groq processes inference at hundreds of tokens per second.
-* When a report is requested, our Go engine feeds the raw metrics (Total Assets, PQC-Ready, Legacy endpoints) into a highly-tuned system prompt.
-* Groq instantly returns a contextual, 2-paragraph strategic analysis regarding the specific "Harvest Now, Decrypt Later" (HNDL) risks present in the scan, completely eliminating generation wait times.
+Standard LLM APIs suffer from high Time-To-First-Token (TTFT) latency, which ruins the UX of generating real-time PDF reports. We integrated the **Groq API**, leveraging their proprietary **Language Processing Units (LPUs)**.
 
-### 4.3 Print-Optimized Compliance PDF Generation
+  * Groq processes inference at hundreds of tokens per second.
+  * When a report is requested, our Go engine feeds the raw metrics (Total Assets, PQC-Ready, Legacy endpoints) into a highly-tuned system prompt.
+  * Groq instantly returns a contextual, 2-paragraph strategic analysis regarding the specific "Harvest Now, Decrypt Later" (HNDL) risks present in the scan, completely eliminating generation wait times.
+
+### 5.3 Print-Optimized Compliance PDF Generation
 
 The culmination of the pipeline is the automated Executive Report. We bypassed heavy, prone-to-break PDF libraries in Go by serving a meticulously styled, print-optimized HTML document.
 
@@ -304,7 +378,7 @@ The culmination of the pipeline is the automated Executive Report. We bypassed h
 sequenceDiagram
     autonumber
     actor CISO as Bank Executive
-    participant React as Dashboard (React)
+    participant React as Dashboard (Next.js)
     participant Go as Engine (Go Fiber)
     participant DB as PostgreSQL
     participant Groq as Groq LPU API
@@ -325,12 +399,20 @@ sequenceDiagram
     React-->>CISO: Trigger Browser Native PDF Save
 ```
 
-**The Output:** A beautiful, white-labeled document featuring PNB branding, key infrastructure KPIs, NIST FIPS 203 readiness percentages, and the Groq-generated strategic roadmap. It allows a security engineer to hand a complete, professional audit to their boss with a single click.
-***
+<div align="center">
+  <img src="./assets/pdf.png" 
+       alt="AI Generated Executive Report" 
+       width="90%" 
+       style="border-radius: 8px; border: 1px solid #334155; box-shadow: 0 4px 8px rgba(0,0,0,0.5);" />
+       <p><em>AI Generated Executive Report (PQC Analysis)</em></p>
+</div>
+<br>
+
 
 ## 6. System Architecture & Diagrams
 
-PNB Quantum Shield operates on a decoupled microservice-like architecture. The React 19 Command Center acts as the presentation layer, while the Golang engine handles heavy concurrent networking, mathematical risk modeling, and asynchronous AI inference.
+
+PNB Quantum Shield operates on a decoupled microservice-like architecture. The NextJs frontend serves as the presentation layer, while the Golang engine handles heavy concurrent networking, mathematical risk modeling, and asynchronous AI inference.
 
 ### 6.1 Enterprise-Wide Architecture (UML)
 
