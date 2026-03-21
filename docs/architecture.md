@@ -4,12 +4,59 @@
 
 ---
 
+
+```mermaid
+graph TB
+    subgraph User_Interface
+        U[("Analyst / CISO / CI/CD")]
+        FE["React Dashboard"]
+    end
+
+    subgraph Backend_Engine
+        API["Fiber API Server\n(HTTP handlers)"]
+        OSINT["Cascading OSINT\n(crt.sh, OTX, CertSpotter)"]
+        Probe["Active Probing\n(Worker Pool + Jitter)"]
+        Risk["Mosca Risk Engine\n(X+Y>Z + Criticality)"]
+        DB[("PostgreSQL\n(Subdomains, Certificates)")]
+        Export["CBOM / PDF Generator\n+ AI (Groq)"]
+        Webhook["Webhook Dispatcher\n(Slack, Jira, GitHub)"]
+    end
+
+    subgraph External_Services
+        CT["Certificate Transparency\n& Threat Intelligence"]
+        AI["Groq AI (LLaMA 3.3)"]
+        Notify["Slack / Jira / GitHub Actions"]
+    end
+
+    U -->|"Trigger scan"| FE
+    FE -->|"REST API"| API
+    API -->|"Start discovery"| OSINT
+    OSINT -->|"Subdomain list"| Probe
+    Probe -->|"TLS metadata"| Risk
+    Risk -->|"Q-Score, risk label"| DB
+    DB -->|"Asset data"| Export
+    Export -->|"CBOM JSON / PDF report"| FE
+    FE -->|"View results"| U
+    DB -->|"Drift detection"| Webhook
+    Webhook -->|"Automated alert"| Notify
+    Notify -->|"Ticket / message"| U
+
+    OSINT -.->|"Fetches subdomains"| CT
+    Export -.->|"AI prompt + metrics"| AI
+    AI -.->|"Executive summary"| Export
+```
+ 
+> *Figure 1: End‑to‑end pipeline showing user interaction, internal components, and external service integration.*
+
+
 ## Executive Summary
 Traditional Attack Surface Management (ASM) tools are fundamentally broken when addressing Post-Quantum Cryptography (PQC). They are often single-threaded, prone to third-party API rate limits, and lack mathematical rigor when assigning risk to legacy cryptographic assets. 
 
 **PNB Quantum Shield** differentiates itself by completely abandoning sequential scripting (e.g., Python) in favor of a natively compiled, highly concurrent **Golang architecture**. Furthermore, we have mathematically codified **Mosca’s Theorem of Quantum Risk** directly into our ingestion pipeline and automated the generation of **CycloneDX 1.6 Cryptographic Bills of Materials (CBOMs)**. This creates a scalable, audit-ready compliance engine capable of mapping an enterprise infrastructure in seconds, not hours.
 
 ---
+
+
 ```mermaid
 graph LR
     User(("Analyst / CISO / CI/CD"))
