@@ -18,7 +18,30 @@
 
 </div>
 
-### **[Live Enterprise Demo: pnb-iitk.vercel.app](https://pnb-iitk.vercel.app/)**
+<div align="center">
+
+<h2>Live Enterprise Demo</h2>
+
+<a href="https://pnb-iitk.vercel.app/" target="_blank">
+  <img src="https://img.shields.io/badge/OPEN%20LIVE%20DEMO-%23pnb--iitk.vercel.app-800000?style=for-the-badge&logo=vercel&logoColor=white" />
+</a>
+
+<table>
+  <tr>
+    <th colspan="2">🔐 Dummy Admin Credentials</th>
+  </tr>
+  <tr>
+    <td><strong>Username</strong></td>
+    <td>admin</td>
+  </tr>
+  <tr>
+    <td><strong>Password</strong></td>
+    <td>Admin@123</td>
+  </tr>
+</table>
+
+</div>
+
 ---
 
 
