@@ -29,19 +29,20 @@ The pipeline is designed to be **enterprise‑ready**: it respects network secur
 
 ## 3. Data Flow Lifecycle
 
+```mermaid
 graph LR
     User(("Analyst / CISO / CI/CD"))
     App["PNB Quantum Shield\n(Go Engine + Mosca Engine)"]
     Target(("OSINT Sources\n(crt.sh, OTX, CertSpotter)\n+ TLS Endpoints"))
     Notify(("Slack / Jira / GitHub Actions"))
 
-    User -- "Scan request (domain)" --> App
-    App -- "1. Discovery + Active Probe\n(anti‑WAF jitter)" --> Target
-    Target -- "TLS metadata + crypto evidence" --> App
-    App -- "2. Mosca Risk Scoring\n(X+Y>Z + criticality)" --> App
-    App -- "3. Dashboard data, CBOM, PDF" --> User
-    App -- "4. Webhook alerts (drift/compliance)" --> Notify
-
+    User -->|Scan request (domain)| App
+    App -->|1. Discovery + Active Probe\n(anti-WAF jitter)| Target
+    Target -->|TLS metadata + crypto evidence| App
+    App -->|2. Mosca Risk Scoring\n(X+Y>Z + criticality)| App
+    App -->|3. Dashboard data, CBOM, PDF| User
+    App -->|4. Webhook alerts (drift/compliance)| Notify
+```
 **Explanation of the flow:**
 
 - **User** (analyst, CISO, or CI/CD system) triggers a scan by sending a domain request to the **PNB Quantum Shield** application.
