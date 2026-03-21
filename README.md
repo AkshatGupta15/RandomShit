@@ -756,12 +756,12 @@ A zero-trust platform must restrict access based on the principle of least privi
 
 -----
 
-\<div align="center"\>
+<div align="center">
 
 **PNB Quantum Shield** *Scan. Classify. Regress. Attest. Future-Proof.*
 
 Built for the **PNB Cybersecurity Hackathon 2026**
 
-\</div\>
+</div>
 
 -----
