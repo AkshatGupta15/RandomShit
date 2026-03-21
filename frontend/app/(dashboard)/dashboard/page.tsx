@@ -9,9 +9,13 @@ import {
   AlertTriangle,
   RefreshCw,
   TrendingUp,
+  BadgeCheck,
+  CircleAlert,
 } from 'lucide-react'
 import { api } from '@/lib/api'
+import { useAuth } from '@/contexts/auth-context'
 import { Button } from '@/components/ui/button'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { 
   RiskDistributionChart, 
   ExpiryTimelineChart, 
@@ -37,6 +41,8 @@ interface ChartData {
 }
 
 export default function DashboardPage() {
+  const { isDemoMode } = useAuth()
+
   const { data: kpis, isLoading: kpiLoading, mutate: mutateKpis } = useSWR<KPIData>(
     'dashboard-kpis',
     () => api.getKPIs(),
@@ -91,6 +97,28 @@ export default function DashboardPage() {
           <RefreshCw className="h-4 w-4" />
           Sync Data
         </Button>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
+      >
+        <Alert className={isDemoMode ? 'glass border-orange-500/40 bg-orange-500/5' : 'glass border-green-500/40 bg-green-500/5'}>
+          {isDemoMode ? (
+            <CircleAlert className="text-orange-400" />
+          ) : (
+            <BadgeCheck className="text-green-500" />
+          )}
+          <AlertTitle className="text-foreground">
+            {isDemoMode ? 'Demo Data Mode Active' : 'Verified Live Data'}
+          </AlertTitle>
+          <AlertDescription>
+            {isDemoMode
+              ? 'This screen is showing mock/demo values. Connect backend API for production-grade live data.'
+              : 'All insights shown here are real backend data from your scanning pipeline, not AI-generated mock data.'}
+          </AlertDescription>
+        </Alert>
       </motion.div>
 
       {/* KPI Cards */}

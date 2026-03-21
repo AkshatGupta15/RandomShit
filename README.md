@@ -44,7 +44,6 @@
 
 ---
 
-
 ## Table of Contents
 
 - [1. Project Overview & Vision](#1-project-overview--vision)
