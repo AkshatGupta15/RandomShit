@@ -10,6 +10,29 @@ Traditional Attack Surface Management (ASM) tools are fundamentally broken when 
 **PNB Quantum Shield** differentiates itself by completely abandoning sequential scripting (e.g., Python) in favor of a natively compiled, highly concurrent **Golang architecture**. Furthermore, we have mathematically codified **Mosca’s Theorem of Quantum Risk** directly into our ingestion pipeline and automated the generation of **CycloneDX 1.6 Cryptographic Bills of Materials (CBOMs)**. This creates a scalable, audit-ready compliance engine capable of mapping an enterprise infrastructure in seconds, not hours.
 
 ---
+```mermaid
+graph LR
+    User(("Analyst / CISO / CI/CD"))
+    App["PNB Quantum Shield\n(Go Engine + Mosca Engine)"]
+    Discovery("Cascading OSINT\ncrt.sh, OTX, CertSpotter,\nHackerTarget")
+    Probe("Active Probing\n(Worker Pool + Jitter)")
+    Risk("Mosca Risk Engine\n(X+Y>Z + Criticality)")
+    DB[("PostgreSQL\n(Assets, Certificates)")]
+    Exports["CBOM / PDF + AI\n(CycloneDX 1.6)"]
+    Alerts("Webhooks\nSlack / Jira / GitHub")
+
+    User -- "Scan request (domain)" --> App
+    App -- "1. Discovery (fallback chain)" --> Discovery
+    Discovery -- "Subdomain list" --> App
+    App -- "2. TLS probes" --> Probe
+    Probe -- "Crypto metadata" --> Risk
+    Risk -- "Q-Score, risk label" --> DB
+    DB -- "Compliance data" --> Exports
+    Exports -- "Report / CBOM" --> User
+    DB -- "Drift detection" --> Alerts
+    Alerts -- "Automated tickets" --> User
+
+```
 
 ## 1. High-Concurrency Golang Architecture
 *The competitive edge against traditional Python-based scanners.*
