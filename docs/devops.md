@@ -11,8 +11,3 @@ Local development and deployment are automated via a root-level `Makefile`. This
 | `make run-backend` | Executes the Golang API server (`go run cmd/api/main.go`). |
 | `make run-frontend` | Starts the Vite React development server (`npm run dev`). |
 | `make run-all` | Concurrently spins up both the backend and frontend in the same terminal instance. |
-
-## Containerization
-The project includes a `docker-compose.yml` file for production-like environments. 
-* The backend is built using `deploy/Dockerfile.backend` and exposed on Port 8080.
-* The frontend is built using `deploy/Dockerfile.frontend` and exposed on Port 5173.

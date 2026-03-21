@@ -548,7 +548,7 @@ Our Go architecture establishes a new performance baseline for ASM tools.
 ### 7.3 Design & Implementation Constraints
 
 1. **No Client-Side Vulnerability Guessing:** The engine determines PQC status *strictly* from the server's negotiated response, eliminating false positives caused by client cipher offerings.
-2. **Zero-Trust Boundaries:** The React 19 frontend contains zero business logic for calculating Q-Scores. It acts solely as a dumb terminal displaying the pre-calculated, verified payload from the Go backend.
+2. **Zero-Trust Boundaries:** The Next JS frontend contains zero business logic for calculating Q-Scores. It acts solely as a dumb terminal displaying the pre-calculated, verified payload from the Go backend.
 3. **Graceful Degradation:** If the Groq API fails or is unreachable, the `/pdf-report` endpoint gracefully degrades to serving a standard mathematical summary without the AI paragraph, ensuring the tool never completely breaks during an audit.
 
 
@@ -750,7 +750,7 @@ flowchart LR
 A zero-trust platform must restrict access based on the principle of least privilege. Phase 2 will expand our JWT implementation to include strict RBAC policies.
 
   * **Security Engineers (Write Access):** Can trigger live scans, modify Mosca's $X$ and $Y$ threshold variables, and add new root domains.
-  * **Compliance Auditors (Read-Only):** Can view the React 19 dashboard, download CycloneDX CBOMs, and export Groq AI PDF reports, but cannot alter the scanning parameters.
+  * **Compliance Auditors (Read-Only):** Can view the Next JS dashboard, download CycloneDX CBOMs, and export Groq AI PDF reports, but cannot alter the scanning parameters.
   * **Audit Logging:** Every scan triggered, configuration changed, and report downloaded will be cryptographically hashed and appended to a tamper-proof SQL audit log to satisfy internal banking regulations.
 
 -----
