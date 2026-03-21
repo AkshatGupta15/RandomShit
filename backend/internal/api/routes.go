@@ -69,9 +69,10 @@ func SetupRoutes(app *fiber.App) {
 	// 8. COMPLIANCE & EXPORTING (Hackathon Winning Feature)
 	// ==========================================
 	export := v1.Group("/export")
-	export.Get("/cbom", handlers.DownloadCBOMJson)        // Exports Cryptographic Bill of Materials (CycloneDX format)
-	export.Get("/pdf-report", handlers.DownloadPDFReport) // Executive summary for PNB management
-	export.Get("/cbom/:domainId", handlers.GenerateCBOM)  // On-demand CBOM for a specific domain
+	export.Get("/cbom", handlers.DownloadCBOMJson)                  // Global CBOM
+	export.Get("/cbom/:domainId", handlers.GenerateCBOM)            // Specific CBOM
+	export.Get("/pdf-report", handlers.DownloadPDFReport)           // Global PDF
+	export.Get("/pdf-report/:domainId", handlers.DownloadPDFReport) // Specific PDF
 
 	// ==========================================
 	// 9. CONFIGURATION & SETTINGS

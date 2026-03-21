@@ -7,7 +7,7 @@ const API_BASE_URL = "http://localhost:8080/api/v1" // Placeholder since no back
 // Demo mode - uses mock data when no API is configured
 // Always true when API_BASE_URL is not set (undefined, null, or empty)
 function isDemoMode(): boolean {
-  return !API_BASE_URL || API_BASE_URL.trim() === ''
+  return !process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_URL.trim() === ''
 }
 
 // Export for use in components
@@ -226,6 +226,18 @@ export const api = {
     return res.json()
   },
 
+  async getDomains() {
+    const result = await this.domains.getAll()
+    return (result.data as any[]).map(domain => ({
+      id: Number(domain.id),
+      domain_name: (domain.domain_name as string | undefined) || (domain.domain as string | undefined) || '',
+      status: (domain.status as string | undefined) || 'unknown',
+      scanned_assets: Number(domain.scanned_assets ?? domain.endpoints ?? 0),
+      total_assets: Number(domain.total_assets ?? domain.scanned_assets ?? 0),
+      last_scanned: (domain.lastScanned as string | null | undefined) || (domain.last_scanned as string | null | undefined) || null,
+    }))
+  },
+
   // Domains
   domains: {
     async getAll(params: PaginationParams = {}): Promise<PaginatedResponse<unknown>> {
@@ -243,8 +255,7 @@ export const api = {
 
       const normalizedData = Array.isArray(payload?.domains)
         ? payload.domains.map((domain: Record<string, unknown>) => ({
-            ...domain,
-            domain: (domain.domain as string | undefined) || (domain.domain_name as string | undefined) || '',
+            ...domain,            domain_name: (domain.domain_name as string | undefined) || (domain.domain as string | undefined) || '',            domain: (domain.domain as string | undefined) || (domain.domain_name as string | undefined) || '',
             lastScanned:
               (domain.lastScanned as string | null | undefined) ||
               (domain.last_scanned as string | null | undefined) ||
@@ -516,33 +527,30 @@ export const api = {
 
   // Dashboard
   async getKPIs() {
-    if (IS_DEMO_MODE) {
-      await simulateDelay()
-      return mockData.mockKPIs
-    }
+    if (IS_DEMO_MODE) return mockData.mockKPIs
+    
     const res = await fetchWithTimeout(`${API_BASE_URL}/dashboard/kpis`)
     if (!res.ok) await throwApiError(res, 'Failed to fetch KPIs')
+    // Go returns: {"total_assets": 132, "live_assets": 40, ...}
     return res.json()
   },
 
   async getRiskChart() {
-    if (IS_DEMO_MODE) {
-      await simulateDelay()
-      return { data: mockData.mockRiskDistribution }
-    }
+    if (IS_DEMO_MODE) return mockData.mockRiskDistribution
+    
     const res = await fetchWithTimeout(`${API_BASE_URL}/dashboard/charts/risk`)
     if (!res.ok) await throwApiError(res, 'Failed to fetch risk chart')
-    return res.json()
+    // Go returns: [{"name": "Elite", "value": 12}, ...]
+    return res.json() 
   },
 
   async getExpiryChart() {
-    if (IS_DEMO_MODE) {
-      await simulateDelay()
-      return { data: mockData.mockExpiryTimeline }
-    }
+    if (IS_DEMO_MODE) return mockData.mockExpiryTimeline
+    
     const res = await fetchWithTimeout(`${API_BASE_URL}/dashboard/charts/expiry`)
     if (!res.ok) await throwApiError(res, 'Failed to fetch expiry chart')
-    return res.json()
+    // Go returns: [{"name": "Already Expired", "count": 2, "fill": "#ef4444"}, ...]
+    return res.json() 
   },
 
   // System
@@ -612,9 +620,13 @@ export const api = {
   async downloadPDFReport(domainId: number) {
     if (IS_DEMO_MODE) {
       await simulateDelay()
-      return `PNB Quantum Shield Security Report\nDomain ID: ${domainId}\nGenerated: ${new Date().toISOString()}\n\nThis is a demo report.`
+      const content = `PNB Quantum Shield Security Report\nDomain ID: ${domainId}\nGenerated: ${new Date().toISOString()}\n\nThis is a demo report.`
+      return content
     }
-    const res = await fetchWithTimeout(`${API_BASE_URL}/export/pdf-report/${domainId}`)
+
+    // Prefer new detailed domain-specific endpoint, fallback to generic one.
+    const endpoint = `${API_BASE_URL}/export/pdf-report/${domainId}`
+    const res = await fetchWithTimeout(endpoint)
     if (!res.ok) await throwApiError(res, 'Failed to download report')
     return res.text()
   },

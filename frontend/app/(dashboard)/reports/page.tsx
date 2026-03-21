@@ -84,12 +84,26 @@ export default function ReportsPage() {
     setIsDownloadingPDF(true)
     try {
       const htmlContent = await api.downloadPDFReport(selectedDomainId)
-      // Open in new window for printing
+
+      // Save generated report as an .html file (manual PDF conversion via browser Print to PDF)
+      const blob = new Blob([htmlContent], { type: 'text/html' })
+      const url = URL.createObjectURL(blob)
+      const fileName = `pnb_report_${selectedDomain?.domain_name || selectedDomainId}.html`
+
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      // offer print experience in new tab
       const printWindow = window.open('', '_blank')
       if (printWindow) {
         printWindow.document.write(htmlContent)
         printWindow.document.close()
-        printWindow.print()
+        printWindow.focus()
       }
     } catch (error) {
       console.error('Failed to download PDF:', error)

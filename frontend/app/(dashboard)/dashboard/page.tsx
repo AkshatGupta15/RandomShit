@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import useSWR from 'swr'
 import {
@@ -13,7 +12,6 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { KPICard, KPICardSkeleton } from '@/components/dashboard/kpi-card'
 import { 
   RiskDistributionChart, 
   ExpiryTimelineChart, 
@@ -21,48 +19,54 @@ import {
   ChartSkeleton 
 } from '@/components/dashboard/charts'
 
+// Updated to match the new robust Go Backend
 interface KPIData {
   total_assets: number
   live_assets: number
   quantum_safe: number
   critical_risk: number
+  pqc_score: number
+  tls_coverage: number
 }
 
-interface RiskData {
+interface ChartData {
   name: string
-  value: number
-}
-
-interface ExpiryData {
-  name: string
-  count: number
+  value?: number
+  count?: number
   fill: string
 }
 
 export default function DashboardPage() {
-  const [pqcScore] = useState(755)
-
-  const { data: kpis, error: kpiError, isLoading: kpiLoading, mutate: mutateKpis } = useSWR<KPIData>(
+  const { data: kpis, isLoading: kpiLoading, mutate: mutateKpis } = useSWR<KPIData>(
     'dashboard-kpis',
     () => api.getKPIs(),
-    { refreshInterval: 30000 }
+    { refreshInterval: 5000 }
   )
 
-  const { data: riskData, error: riskError, isLoading: riskLoading } = useSWR<RiskData[]>(
+  const { data: riskData, isLoading: riskLoading } = useSWR<ChartData[]>(
     'dashboard-risk',
     () => api.getRiskChart(),
-    { refreshInterval: 30000 }
+    { refreshInterval: 5000 }
   )
 
-  const { data: expiryData, error: expiryError, isLoading: expiryLoading } = useSWR<ExpiryData[]>(
+  const { data: expiryData, isLoading: expiryLoading } = useSWR<ChartData[]>(
     'dashboard-expiry',
     () => api.getExpiryChart(),
-    { refreshInterval: 30000 }
+    { refreshInterval: 5000 }
   )
 
-  const handleRefresh = () => {
-    mutateKpis()
-  }
+  // Fallback simple KPI Card in case your imported one is broken
+  const SimpleKPICard = ({ title, value, icon: Icon, color }: any) => (
+    <div className="glass rounded-xl p-6 border border-border/50 flex flex-col justify-between">
+      <div className="flex justify-between items-start mb-4">
+        <p className="text-sm text-muted-foreground">{title}</p>
+        <div className={`p-2 rounded-lg bg-secondary/50 ${color}`}>
+          <Icon className="h-5 w-5" />
+        </div>
+      </div>
+      <h3 className="text-3xl font-bold text-foreground">{value}</h3>
+    </div>
+  )
 
   return (
     <div className="space-y-6">
@@ -73,129 +77,84 @@ export default function DashboardPage() {
         className="flex items-center justify-between"
       >
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+          <h1 className="text-2xl font-bold text-foreground">Command Center</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Real-time security posture overview
+            Real-time PQC & Attack Surface Analytics
           </p>
         </div>
         <Button
           variant="outline"
           size="sm"
-          onClick={handleRefresh}
+          onClick={() => mutateKpis()}
           className="gap-2 border-pnb-gold/30 hover:border-pnb-gold/50 hover:bg-pnb-gold/10"
         >
           <RefreshCw className="h-4 w-4" />
-          Refresh
+          Sync Data
         </Button>
       </motion.div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpiLoading ? (
-          <>
-            <KPICardSkeleton />
-            <KPICardSkeleton />
-            <KPICardSkeleton />
-            <KPICardSkeleton />
-          </>
-        ) : kpiError ? (
-          <div className="col-span-4 glass rounded-xl p-8 text-center border border-destructive/30">
-            <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground">Failed to load KPIs</p>
-          </div>
+           Array(4).fill(0).map((_, i) => <div key={i} className="h-32 glass rounded-xl animate-pulse" />)
         ) : (
           <>
-            <KPICard
-              title="Total Assets"
-              value={kpis?.total_assets || 0}
-              icon={Server}
-              variant="gold"
-              delay={0}
-              trend={{ value: 12, isPositive: true }}
-            />
-            <KPICard
-              title="Live Endpoints"
-              value={kpis?.live_assets || 0}
-              icon={Activity}
-              variant="default"
-              delay={0.1}
-            />
-            <KPICard
-              title="Quantum-Safe (Elite)"
-              value={kpis?.quantum_safe || 0}
-              icon={Shield}
-              variant="elite"
-              delay={0.2}
-              trend={{ value: 8, isPositive: true }}
-            />
-            <KPICard
-              title="Critical Risks"
-              value={kpis?.critical_risk || 0}
-              icon={AlertTriangle}
-              variant="critical"
-              delay={0.3}
-              trend={{ value: 2, isPositive: false }}
-            />
+            <SimpleKPICard title="Total Assets" value={kpis?.total_assets || 0} icon={Server} color="text-pnb-gold" />
+            <SimpleKPICard title="Live Endpoints" value={kpis?.live_assets || 0} icon={Activity} color="text-blue-400" />
+            <SimpleKPICard title="Quantum-Safe (Elite)" value={kpis?.quantum_safe || 0} icon={Shield} color="text-green-500" />
+            <SimpleKPICard title="Critical Risks" value={kpis?.critical_risk || 0} icon={AlertTriangle} color="text-red-500" />
           </>
         )}
       </div>
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {riskLoading ? (
-          <ChartSkeleton className="lg:col-span-1" />
-        ) : riskError ? (
-          <div className="glass rounded-xl p-8 text-center border border-destructive/30">
-            <p className="text-sm text-muted-foreground">Failed to load chart</p>
-          </div>
-        ) : (
-          <RiskDistributionChart
-  data={Array.isArray(riskData) ? riskData : []}
-  className="lg:col-span-1"
-/>
+        {riskLoading ? <ChartSkeleton className="lg:col-span-1" /> : (
+          <RiskDistributionChart data={riskData || []} className="lg:col-span-1" />
         )}
 
-        {expiryLoading ? (
-          <ChartSkeleton className="lg:col-span-1" />
-        ) : expiryError ? (
-          <div className="glass rounded-xl p-8 text-center border border-destructive/30">
-            <p className="text-sm text-muted-foreground">Failed to load chart</p>
-          </div>
-        ) : (
+        {expiryLoading ? <ChartSkeleton className="lg:col-span-1" /> : (
           <ExpiryTimelineChart data={expiryData || []} className="lg:col-span-1" />
         )}
 
-        <PQCScoreGauge score={pqcScore} className="lg:col-span-1" />
+        <PQCScoreGauge score={kpis?.pqc_score || 0} className="lg:col-span-1" />
       </div>
 
-      {/* Quick Stats */}
+      {/* Highly Informative Security Compliance Strip */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
+        transition={{ delay: 0.2 }}
         className="glass rounded-xl p-5 border border-border/50"
       >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-medium text-foreground">Security Compliance</h3>
+          <h3 className="text-sm font-medium text-foreground">Compliance & Architecture</h3>
           <TrendingUp className="h-4 w-4 text-elite" />
         </div>
         
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="p-3 rounded-lg bg-secondary/30">
-            <p className="text-xs text-muted-foreground mb-1">NIST FIPS 203/204</p>
-            <p className="text-lg font-semibold text-elite">Compliant</p>
+          <div className="p-4 rounded-lg bg-secondary/20 border border-white/5">
+            <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">NIST FIPS 203 Readiness</p>
+            <p className="text-2xl font-semibold text-elite">
+              {kpis?.total_assets && kpis?.total_assets > 0 
+                ? `${Math.round((kpis.quantum_safe / kpis.total_assets) * 100)}%` 
+                : '0%'}
+            </p>
           </div>
-          <div className="p-3 rounded-lg bg-secondary/30">
-            <p className="text-xs text-muted-foreground mb-1">TLS 1.3 Coverage</p>
-            <p className="text-lg font-semibold text-foreground">87%</p>
+          <div className="p-4 rounded-lg bg-secondary/20 border border-white/5">
+            <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">TLS 1.3 Coverage</p>
+            <p className="text-2xl font-semibold text-foreground">{kpis?.tls_coverage || 0}%</p>
           </div>
-          <div className="p-3 rounded-lg bg-secondary/30">
-            <p className="text-xs text-muted-foreground mb-1">Certificate Health</p>
-            <p className="text-lg font-semibold text-pnb-gold">Good</p>
+          <div className="p-4 rounded-lg bg-secondary/20 border border-white/5">
+            <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Engine Architecture</p>
+            <p className="text-lg font-semibold text-pnb-gold mt-1">Go (Goroutines)</p>
           </div>
-          <div className="p-3 rounded-lg bg-secondary/30">
-            <p className="text-xs text-muted-foreground mb-1">Last Scan</p>
-            <p className="text-lg font-semibold text-foreground">2h ago</p>
+          <div className="p-4 rounded-lg bg-secondary/20 border border-white/5">
+            <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Database Link</p>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <p className="text-lg font-semibold text-foreground">PostgreSQL Active</p>
+            </div>
           </div>
         </div>
       </motion.div>

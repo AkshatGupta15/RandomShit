@@ -15,23 +15,27 @@ import (
 )
 
 func main() {
-	// 1. Connect DB
-	// db.ConnectDatabase("postgres://postgres:password@localhost:5432/postgres?sslmode=disable")
-
+	// Load environment variables from repository root .env (supports backend/ root structure)
 	err := godotenv.Load("../.env")
 	if err != nil {
-		log.Println("No .env file found")
+		log.Println("Warning: .env not found, falling back to actual environment values")
 	}
-	log.Println("DATABASE_URL:", os.Getenv("DATABASE_URL")) // debug
-	// Connect DB
-	db.ConnectDatabase(os.Getenv("DATABASE_URL"))
+
+	// 1. Connect DB
+	// Allow DATABASE_URL from env if specified
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = "postgres://postgres:password@localhost:5432/postgres?sslmode=disable"
+	}
+	db.ConnectDatabase(databaseURL)
+
 	// 2. Setup Fiber
 	app := fiber.New()
 	app.Use(logger.New())
 	// app.Use(cors.New(cors.Config{AllowOrigins: "http://localhost:3000"}))
 	app.Use(cors.New(cors.Config{
 		// AllowOrigins:     "http://localhost:3000",
-		AllowOrigins:     "*",
+		AllowOrigins:     "http://localhost:3000,https://your-app.pages.dev",
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowCredentials: true,

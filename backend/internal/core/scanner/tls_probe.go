@@ -1,13 +1,15 @@
 package scanner
 
 import (
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"net"
 	"time"
 
-	// IMPORTANT: Update this import path to match your go.mod module name
-	// If your go.mod says "module pnb-hackathon", change this to "pnb-hackathon/internal/models"
 	"github.com/AkshatGupta15/RandomShit/backend/internal/models"
 )
 
@@ -23,18 +25,32 @@ func determinePQCTier(tlsVersion uint16) string {
 	}
 }
 
+// getKeyInfo returns a string like "RSA-2048", "ECDSA-256", "Ed25519"
+func getKeyInfo(cert *x509.Certificate) string {
+	switch pub := cert.PublicKey.(type) {
+	case *rsa.PublicKey:
+		return fmt.Sprintf("RSA-%d", pub.N.BitLen())
+	case *ecdsa.PublicKey:
+		return fmt.Sprintf("ECDSA-%d", pub.Curve.Params().BitSize)
+	case ed25519.PublicKey:
+		return "Ed25519"
+	default:
+		return "Unknown"
+	}
+}
+
 // ProbeTLS connects to the asset and extracts cryptographic details directly into the DB model
 func ProbeTLS(domain string, ip string) *models.SSLCertificate {
 	dialer := &net.Dialer{Timeout: 4 * time.Second}
 	config := &tls.Config{
 		InsecureSkipVerify: true,
-		ServerName:         domain, // SNI routing to bypass modern firewalls
+		ServerName:         domain,
 		MinVersion:         tls.VersionTLS10,
 	}
 
 	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(ip, "443"), config)
 	if err != nil {
-		return nil // Port 443 is likely closed or not serving HTTPS
+		return nil
 	}
 	defer conn.Close()
 
@@ -42,34 +58,41 @@ func ProbeTLS(domain string, ip string) *models.SSLCertificate {
 	if len(state.PeerCertificates) == 0 {
 		return nil
 	}
-
 	cert := state.PeerCertificates[0]
 
-	// Extract details
+	// Extract issuer
 	issuer := "Unknown"
 	if len(cert.Issuer.Organization) > 0 {
 		issuer = cert.Issuer.Organization[0]
 	}
 
-	// Determine public key type
-	keyAlgo := "Unknown"
-	switch cert.PublicKeyAlgorithm {
-	case x509.RSA:
-		keyAlgo = "RSA"
-	case x509.ECDSA:
-		keyAlgo = "ECDSA"
-	case x509.Ed25519:
-		keyAlgo = "Ed25519"
-	}
+	// Get key info
+	keyInfo := getKeyInfo(cert)
 
-	// Return the GORM Database Model directly
+	// Get TLS version string
+	tlsVersionStr := tls.VersionName(state.Version)
+
+	// Get cipher suite name
+	cipherSuiteName := tls.CipherSuiteName(state.CipherSuite)
+
+	// Calculate Mosca Q‑Score and risk label
+	qScore, riskLabel := ComputeFinalRisk(
+		tlsVersionStr,
+		cipherSuiteName,
+		keyInfo,
+		cert.NotAfter,
+	)
+
+	// Build the certificate model
 	return &models.SSLCertificate{
 		Issuer:      issuer,
 		ValidFrom:   cert.NotBefore,
 		ValidTo:     cert.NotAfter,
-		TLSVersion:  tls.VersionName(state.Version), // Go 1.21+ native version mapping
-		CipherSuite: tls.CipherSuiteName(state.CipherSuite),
-		KeyLength:   keyAlgo,
+		TLSVersion:  tlsVersionStr,
+		CipherSuite: cipherSuiteName,
+		KeyLength:   keyInfo,
 		PQCTier:     determinePQCTier(state.Version),
+		QScore:      qScore,
+		RiskLabel:   riskLabel,
 	}
 }
