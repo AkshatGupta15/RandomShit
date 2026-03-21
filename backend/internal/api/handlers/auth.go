@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"os"
 	"time"
 
 	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
@@ -50,15 +51,23 @@ func LoginUser(c *fiber.Ctx) error {
 	}
 
 	// 4. Set the Secure HttpOnly Cookie
+	env := os.Getenv("ENV")
+
+	secure := false
+	sameSite := "Lax"
+
+	if env == "production" {
+		secure = true
+		sameSite = "None"
+	}
+
 	c.Cookie(&fiber.Cookie{
 		Name:     "jwt_auth",
 		Value:    t,
-		Expires:  time.Now().Add(24 * time.Hour),
-		HTTPOnly: true, // CRITICAL: Protects against XSS attacks
-		Secure:   false, // Set to true if using HTTPS in production
-		SameSite: "Lax",
+		HTTPOnly: true,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
-
 	return c.JSON(fiber.Map{
 		"message": "Login successful",
 		"user": fiber.Map{
@@ -102,7 +111,7 @@ func GetSessionUser(c *fiber.Ctx) error {
 
 	// 3. Extract claims and return to React
 	claims := token.Claims.(jwt.MapClaims)
-	
+
 	return c.JSON(fiber.Map{
 		"user": fiber.Map{
 			"id":       claims["user_id"],

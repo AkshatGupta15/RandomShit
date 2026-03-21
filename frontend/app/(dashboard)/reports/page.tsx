@@ -51,7 +51,19 @@ export default function ReportsPage() {
 
   const { data: domains, isLoading: domainsLoading } = useSWR<Domain[]>(
     'domains',
-    () => api.getDomains()
+    async () => {
+      const response = await api.domains.getAll()
+      const rows = Array.isArray(response) ? response : Array.isArray(response?.data) ? response.data : []
+
+      return rows.map((domain: any) => ({
+        id: Number(domain.id),
+        domain_name: (domain.domain_name as string | undefined) || (domain.domain as string | undefined) || '',
+        status: (domain.status as string | undefined) || 'unknown',
+        scanned_assets: Number(domain.scanned_assets ?? domain.endpoints ?? 0),
+        total_assets: Number(domain.total_assets ?? domain.scanned_assets ?? domain.endpoints ?? 0),
+        last_scanned: (domain.last_scanned as string | null | undefined) || (domain.lastScanned as string | null | undefined) || null,
+      }))
+    }
   )
 
   const selectedDomain = domains?.find(d => d.id === selectedDomainId)

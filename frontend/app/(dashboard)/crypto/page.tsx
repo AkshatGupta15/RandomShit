@@ -19,6 +19,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DataTable, StatusBadge, PQCSupportBadge, Column } from '@/components/tables/data-table'
 import { PQCScoreGauge } from '@/components/dashboard/charts'
 
+interface KPIData {
+  pqc_score: number
+}
+
 interface QuantumReadyAsset {
   id: number
   subdomain_id: number
@@ -28,6 +32,10 @@ interface QuantumReadyAsset {
   issuer: string
   asset_name?: string
   url?: string
+  subdomain?: {
+    hostname?: string
+  }
+  cipher_suite?: string
 }
 
 interface VulnerableAsset {
@@ -37,20 +45,12 @@ interface VulnerableAsset {
   key_length: string
   asset_name?: string
   vulnerability?: string
-}
-
-interface Asset {
-  id: number
-  rootDomain: string
-  assetName: string
-  url: string
-  ipv4: string
-  type: string
-  certStatus: string
-  keyLength: string
-  cipherSuite: string
-  tlsVersion: string
-  certificateAuthority: string
+  url?: string
+  subdomain?: {
+    hostname?: string
+  }
+  issuer?: string
+  cipher_suite?: string
 }
 
 const tierDescriptions = {
@@ -61,42 +61,48 @@ const tierDescriptions = {
 }
 
 export default function CryptoInventoryPage() {
-  const { data: quantumReady, isLoading: qrLoading, mutate: mutateQR } = useSWR(
+  const { data: kpis, mutate: mutateKpis } = useSWR<KPIData>(
+    'dashboard-kpis',
+    () => api.getKPIs(),
+    { refreshInterval: 30000 }
+  )
+
+  const { data: quantumReady, isLoading: qrLoading, mutate: mutateQR } = useSWR<{ assets: QuantumReadyAsset[] }>(
     'crypto-quantum-ready',
     () => api.getQuantumReadyAssets(),
     { refreshInterval: 30000 }
   )
 
-  const { data: vulnerable, isLoading: vulnLoading, mutate: mutateVuln } = useSWR(
+  const { data: vulnerable, isLoading: vulnLoading, mutate: mutateVuln } = useSWR<{ assets: VulnerableAsset[] }>(
     'crypto-vulnerabilities',
     () => api.getVulnerableAssets(),
     { refreshInterval: 30000 }
   )
 
-  const { data: assets } = useSWR<Asset[]>(
-    'assets',
-    () => api.getAssets(),
-    { refreshInterval: 30000 }
-  )
-
   const handleRefresh = () => {
+    mutateKpis()
     mutateQR()
     mutateVuln()
   }
 
-  // Transform assets into crypto inventory
-  const cryptoAssets = (Array.isArray(assets) ? assets : []).map((asset, index) => ({
-    id: asset.id,
-    assetName: asset.assetName,
-    url: asset.url,
-    pqc_tier: asset.tlsVersion?.includes('1.3') ? 'Elite' as const : 
-              asset.tlsVersion?.includes('1.2') ? 'Standard' as const : 'Legacy' as const,
-    tls_version: asset.tlsVersion || 'Unknown',
-    key_length: asset.keyLength || 'RSA-2048',
-    cipher_suite: asset.cipherSuite || 'TLS_AES_256_GCM_SHA384',
-    issuer: asset.certificateAuthority || 'Unknown',
-    pqc_support: index % 3 === 0,
-  }))
+  const readyAssets = Array.isArray(quantumReady?.assets) ? quantumReady.assets : []
+  const vulnerableAssets = Array.isArray(vulnerable?.assets) ? vulnerable.assets : []
+
+  const cryptoAssets = [...readyAssets, ...vulnerableAssets].map((asset, index) => {
+    const hostname = asset.subdomain?.hostname || ''
+    const tier = asset.pqc_tier === 'Critical' ? 'Legacy' : (asset.pqc_tier || 'Legacy')
+    return {
+      id: asset.id,
+      assetName: asset.asset_name || hostname || `Asset #${asset.id}`,
+      url: asset.url || (hostname ? `https://${hostname}` : '-'),
+      pqc_tier: tier as 'Elite' | 'Standard' | 'Legacy',
+      tls_version: asset.tls_version || 'Unknown',
+      key_length: asset.key_length || 'Unknown',
+      cipher_suite: asset.cipher_suite || 'Unknown',
+      issuer: (asset as { issuer?: string }).issuer || 'Unknown',
+      pqc_support: tier === 'Elite' || tier === 'Standard' || index % 2 === 0,
+    }
+  })
 
   const eliteAssets = cryptoAssets.filter(a => a.pqc_tier === 'Elite')
   const standardAssets = cryptoAssets.filter(a => a.pqc_tier === 'Standard')
@@ -265,7 +271,7 @@ export default function CryptoInventoryPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
         >
-          <PQCScoreGauge score={755} className="h-full" />
+          <PQCScoreGauge score={kpis?.pqc_score ?? (stats.total > 0 ? Math.round((stats.elite / stats.total) * 1000) : 0)} className="h-full" />
         </motion.div>
       </div>
 
