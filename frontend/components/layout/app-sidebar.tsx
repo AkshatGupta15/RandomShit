@@ -45,6 +45,7 @@ const navigationItems = [
     items: [
       { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
       { name: 'Scanner', href: '/scanner', icon: Scan },
+      { name: 'Topology Map', href: '/network', icon: Activity },
     ],
   },
   {

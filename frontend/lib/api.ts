@@ -2,11 +2,11 @@
 import * as mockData from './mock-data'
 
 // const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
-// const API_BASE_URL = "http://localhost:8080/api/v1" // Placeholder since no backend is configured
+const API_BASE_URL = "http://localhost:8080/api/v1" // Placeholder since no backend is configured
 // const API_BASE_URL = "https://randomshit-1.onrender.com/api/v1" // Placeholder since no backend is configured
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1"
+// const API_BASE_URL =
+  // process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1"
 // Demo mode - uses mock data when no API is configured
 // Always true when API_BASE_URL is not set (undefined, null, or empty)
 function isDemoMode(): boolean {
@@ -529,6 +529,17 @@ export const api = {
   },
 
   // Dashboard
+  async getTopologyData() {
+    console.log(`Fetching LIVE Multi-Domain OSINT data...`);
+    try {
+      const res = await fetch(`${API_BASE_URL}/scan/live-topology`);
+      if (!res.ok) throw new Error('Backend failed');
+      return await res.json();
+    } catch (error) {
+      console.error("Failed to fetch live data", error);
+      return { nodes: [], links: [] };
+    }
+  },
   async getKPIs() {
     if (IS_DEMO_MODE) return mockData.mockKPIs
     

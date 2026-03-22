@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
@@ -88,5 +89,80 @@ func GetExpiryTimeline(c *fiber.Ctx) error {
 		{"name": "< 60 Days", "count": days60, "fill": "#eab308"},
 		{"name": "< 90 Days", "count": days90, "fill": "#3b82f6"},
 		{"name": "Safe (>90)", "count": safe, "fill": "#22c55e"},
+	})
+}
+
+// GetNetworkTopology - GET /api/v1/dashboard/topology
+func GetNetworkTopology(c *fiber.Ctx) error {
+	type Node struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Val   int    `json:"val"`
+		Color string `json:"color"`
+		Group int    `json:"group"`
+	}
+
+	type Link struct {
+		Source string `json:"source"`
+		Target string `json:"target"`
+	}
+
+	var nodes []Node
+	var links []Link
+
+	// 1. Fetch all domains and their subdomains with SSL certs
+	var domains []models.Domain
+	db.DB.Preload("Subdomains.SSLCert").Find(&domains)
+
+	// 2. Build the Graph
+	for _, d := range domains {
+		// Add the Root Domain Node (The Center)
+		nodes = append(nodes, Node{
+			ID:    d.DomainName,
+			Name:  "ROOT: " + d.DomainName,
+			Val:   25,        // Larger size for root
+			Color: "#800000", // PNB Maroon
+			Group: 0,
+		})
+
+		// Loop through all subdomains (The Branches)
+		for _, sub := range d.Subdomains {
+			color := "#64748b" // Default gray (Unknown)
+			statusLabel := "Unknown"
+
+			if sub.SSLCert != nil {
+				if sub.SSLCert.PQCTier == "Elite" {
+					color = "#22c55e" // Green (Safe)
+					statusLabel = "FIPS 203 Compliant"
+				} else if sub.SSLCert.PQCTier == "Standard" {
+					color = "#eab308" // Gold (Warning)
+					statusLabel = "Classical (Transition)"
+				} else {
+					color = "#ef4444" // Red (Critical)
+					statusLabel = "Vulnerable (HNDL Risk)"
+				}
+			}
+
+			// Add the Subdomain Node
+			nodes = append(nodes, Node{
+				ID:    sub.Hostname,
+				Name:  fmt.Sprintf("%s\nStatus: %s", sub.Hostname, statusLabel),
+				Val:   10, // Smaller size for subdomains
+				Color: color,
+				Group: 1,
+			})
+
+			// Create a link connecting the subdomain back to the root
+			links = append(links, Link{
+				Source: d.DomainName,
+				Target: sub.Hostname,
+			})
+		}
+	}
+
+	// 3. Return the exact JSON structure
+	return c.JSON(fiber.Map{
+		"nodes": nodes,
+		"links": links,
 	})
 }

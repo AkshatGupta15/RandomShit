@@ -32,6 +32,7 @@ func SetupRoutes(app *fiber.App) {
 	dash.Get("/kpis", handlers.GetTopKPIs)
 	dash.Get("/charts/risk", handlers.GetRiskDistribution)
 	dash.Get("/charts/expiry", handlers.GetExpiryTimeline)
+	dash.Get("/topology", handlers.GetNetworkTopology)
 	// ==========================================
 	// 4. SCANNER ORCHESTRATION (The Background Engine)
 	// ==========================================
@@ -39,6 +40,7 @@ func SetupRoutes(app *fiber.App) {
 	scan.Post("/start", handlers.StartPipeline)             // Triggers the heavy background worker
 	scan.Post("/stop/:domainId", handlers.StopPipeline)     // Emergency halt
 	scan.Get("/status/:domainId", handlers.GetScanProgress) // Real-time % complete for the UI loader
+	scan.Get("/live-topology", handlers.GetLiveTopology)
 
 	// ==========================================
 	// 5. ROOT DOMAIN MANAGEMENT (The targets)
