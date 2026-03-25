@@ -123,15 +123,20 @@ export default function DomainsPage() {
       ),
     },
     {
-      key: 'registrar',
-      header: 'Registrar',
-      sortable: true,
-      render: (value) => (
-        <span className="text-sm text-muted-foreground">
-          {(value as string) || 'Unknown'}
-        </span>
-      ),
-    },
+  key: 'registrar',
+  header: 'Registrar',
+  sortable: true,
+  render: (value) => {
+    const text = (value as string) || 'Unknown'
+    const maxLength = 20
+
+    return (
+      <span className="text-sm text-muted-foreground">
+        {text.length > maxLength ? text.slice(0, maxLength) + '...' : text}
+      </span>
+    )
+  },
+},
     {
       key: 'registration_date',
       header: 'Registration Date',
