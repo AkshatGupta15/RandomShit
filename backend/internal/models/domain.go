@@ -2,21 +2,20 @@ package models
 
 import (
 	"time"
-	"gorm.io/gorm"
 )
 
 type Domain struct {
-	ID            uint           `gorm:"primaryKey" json:"id"`
-	DomainName    string         `gorm:"uniqueIndex;not null" json:"domain_name"`
-	Status        string         `gorm:"default:'pending'" json:"status"` // pending, scanning, completed, halted, failed
-	
-	// Progress Tracking Fields
-	TotalAssets   int            `gorm:"default:0" json:"total_assets"`
-	ScannedAssets int            `gorm:"default:0" json:"scanned_assets"`
-	
-	LastScanned   time.Time      `json:"last_scanned"`
-	Subdomains    []Subdomain    `gorm:"foreignKey:DomainID;constraint:OnDelete:CASCADE;" json:"subdomains,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
+	ID               uint        `gorm:"primaryKey" json:"id"`
+	DomainName       string      `gorm:"unique;not null" json:"domain_name"`
+	Status           string      `json:"status"`
+	RiskLevel        string      `json:"risk_level"` // e.g., "Critical", "Moderate", "Safe"
+	TotalAssets      int         `json:"total_assets"`
+	ScannedAssets    int         `json:"scanned_assets"`
+	Endpoints        int         `json:"endpoints"`
+	CompanyName      string      `json:"company_name"`
+	Registrar        string      `json:"registrar"`
+	RegistrationDate string      `json:"registration_date"`
+	DetectionDate    time.Time   `json:"detection_date"`
+	LastScanned      *time.Time  `json:"last_scanned"`
+	Subdomains       []Subdomain `json:"Subdomains,omitempty" gorm:"foreignKey:DomainID"`
 }

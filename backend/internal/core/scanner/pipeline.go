@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
@@ -39,7 +40,7 @@ func RunEnterprisePipeline(ctx context.Context, domainID uint, rootDomain string
 	} // Fallback safety
 
 	semaphore := make(chan struct{}, workerLimit)
-
+	var totalLiveAssets int64 = 0
 	for _, sub := range subdomains {
 		// THE KILL SWITCH: Check if the admin clicked "Stop" before launching next worker
 		select {
@@ -57,55 +58,49 @@ func RunEnterprisePipeline(ctx context.Context, domainID uint, rootDomain string
 			defer wg.Done()
 			defer func() { <-semaphore }()
 
-			// 1. Resolve IP to check if it's alive
+			// 1. Resolve IP – if none, discard this subdomain
 			ip := ResolveIP(hostname)
-			isAlive := (ip != "")
+			if ip == "" {
+				return // skip dead subdomain
+			}
+			atomic.AddInt64(&totalLiveAssets, 1)
 
-			// 2. SAVE EVERY SUBDOMAIN TO THE DB (Alive or Dead)
+			// 2. Save the live subdomain
 			newSub := models.Subdomain{
 				DomainID:  domainID,
 				Hostname:  hostname,
-				IPAddress: ip,      // Will just be "" if dead
-				IsAlive:   isAlive, // True if alive, False if dead/dangling
+				IPAddress: ip,
+				IsAlive:   true,
 			}
 			db.DB.Create(&newSub)
 
-			// 3. ONLY run Port and Crypto scans if the asset is actually alive
-			if isAlive {
-				// TARGET PORTS: The Top Enterprise Attack Surface Ports
-				targetPorts := []int{21, 22, 80, 443, 3306, 3389, 5432, 8080, 8443, 9000, 9443}
-
-				for _, port := range targetPorts {
-					if ScanPort(ip, port) {
-
-						// HTTP Fingerprinting
-						httpInfo := ProbeHTTP(hostname, port)
-						if httpInfo != nil {
-							db.DB.Create(&models.Service{
-								SubdomainID: newSub.ID,
-								Port:        port,
-								Protocol:    "tcp",
-								WebTech:     httpInfo.Server,
-								StatusCode:  httpInfo.StatusCode,
-								PageTitle:   httpInfo.Title,
-							})
-						}
-
-						// PQC & TLS Cryptography Extraction (Ports 443 & 8443)
-						if port == 443 || port == 8443 {
-							certData := ProbeTLS(hostname, ip)
-							if certData != nil {
-								certData.SubdomainID = newSub.ID
-								db.DB.Create(certData)
-							}
+			// 3. Port scanning and TLS probing
+			targetPorts := []int{21, 22, 80, 443, 3306, 3389, 5432, 8080, 8443, 9000, 9443}
+			for _, port := range targetPorts {
+				if ScanPort(ip, port) {
+					httpInfo := ProbeHTTP(hostname, port)
+					if httpInfo != nil {
+						db.DB.Create(&models.Service{
+							SubdomainID: newSub.ID,
+							Port:        port,
+							Protocol:    "tcp",
+							WebTech:     httpInfo.Server,
+							StatusCode:  httpInfo.StatusCode,
+							PageTitle:   httpInfo.Title,
+						})
+					}
+					if port == 443 || port == 8443 {
+						certData := ProbeTLS(hostname, ip)
+						if certData != nil {
+							certData.SubdomainID = newSub.ID
+							db.DB.Create(certData)
 						}
 					}
 				}
 			}
 
-			// 4. Increment the progress bar for the React UI
+			// 4. Increment progress (only for live assets)
 			db.DB.Model(&models.Domain{}).Where("id = ?", domainID).UpdateColumn("scanned_assets", gorm.Expr("scanned_assets + ?", 1))
-
 		}(sub)
 	}
 
@@ -116,6 +111,7 @@ func RunEnterprisePipeline(ctx context.Context, domainID uint, rootDomain string
 		"status":         "completed",
 		"last_scanned":   time.Now(),
 		"scanned_assets": totalFound, // Ensure it locks to 100%
+		"total_assets":   totalLiveAssets,
 	})
 	fmt.Printf("[✅] PIPELINE COMPLETED: %s\n", rootDomain)
 }

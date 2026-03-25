@@ -177,6 +177,24 @@ async function throwApiError(response: Response, fallbackMessage: string): Promi
 }
 
 export const api = {
+getDomain: async (id: number) => {
+  if (IS_DEMO_MODE) {
+    await simulateDelay()
+    const domain = mockData.mockDomains.find(d => d.id === id)
+    if (!domain) throw new ApiError(404, 'Domain not found')
+    return domain
+  }
+  const res = await fetchWithTimeout(`${API_BASE_URL}/domains/${id}`)
+  if (!res.ok) await throwApiError(res, 'Failed to fetch domain')
+  return res.json()
+},
+
+// (Optional) If you want a separate subdomain endpoint, but the domain endpoint already includes them
+getDomainSubdomains: async (id: number) => {
+  const res = await fetchWithTimeout(`${API_BASE_URL}/domains/${id}/subdomains`)
+  if (!res.ok) await throwApiError(res, 'Failed to fetch subdomains')
+  return res.json()
+},
   // Auth
   async login(username: string, password: string) {
     if (IS_DEMO_MODE) {

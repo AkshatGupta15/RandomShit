@@ -71,7 +71,7 @@ export default function NetworkGraph() {
     setHoverNode(null);
   }
 
-  // 🟢 FIXED PHYSICS: ADDED GRAVITY TO PREVENT OVERFLOW 🟢
+  //  FIXED PHYSICS: ADDED GRAVITY TO PREVENT OVERFLOW 
   useEffect(() => {
     if (fgRef.current && hasScanned && graphData.nodes.length > 0) {
       // 1. Reduced the outward push slightly so they don't fly away
@@ -110,7 +110,7 @@ export default function NetworkGraph() {
   return (
     <div ref={containerRef} className="relative w-full min-w-0 h-[650px] max-w-full rounded-xl overflow-hidden border border-white/5 shadow-2xl bg-[#0d1117] flex items-center justify-center">
       
-      {/* 🟢 STATE 1: IDLE 🟢 */}
+      {/*  STATE 1: IDLE  */}
       {!isScanning && !hasScanned && (
         <div className="z-10 w-full max-w-md p-8 glass rounded-2xl border border-white/10 bg-[#161b22]/80 backdrop-blur-xl shadow-2xl">
           <div className="flex items-center gap-4 mb-6 pb-6 border-b border-white/10">
@@ -151,7 +151,7 @@ export default function NetworkGraph() {
         </div>
       )}
 
-      {/* 🟢 STATE 2: SCANNING 🟢 */}
+      {/*  STATE 2: SCANNING  */}
       {isScanning && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0d1117]/90 backdrop-blur-sm">
           <div className="relative flex items-center justify-center w-24 h-24 mb-6">
@@ -165,7 +165,7 @@ export default function NetworkGraph() {
         </div>
       )}
 
-      {/* 🟢 STATE 3: ANALYZED GRAPH 🟢 */}
+      {/*  STATE 3: ANALYZED GRAPH  */}
       {hasScanned && (
         <>
           <div className="absolute top-6 left-6 z-10 pointer-events-none">

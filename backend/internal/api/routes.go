@@ -49,6 +49,7 @@ func SetupRoutes(app *fiber.App) {
 	domains.Get("/", handlers.ListRootDomains)        // Lists pnbindia.in, netpnb.com
 	domains.Post("/", handlers.AddRootDomain)         // Admin adds a new target
 	domains.Delete("/:id", handlers.RemoveRootDomain) // Cascading delete of all discovered data
+	domains.Get("/:id", handlers.GetDomainDetails)
 
 	// ==========================================
 	// 6. ASSET INVENTORY (The Discovered Hub)

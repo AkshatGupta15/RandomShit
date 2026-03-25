@@ -30,6 +30,11 @@ interface SSLCertificate {
   status: 'new' | 'false_positive' | 'confirmed'
   key_length?: string
   tls_version?: string
+  cipher_suite?: string
+  pqc_tier?: string
+  q_score?: number
+  risk_label?: string
+  
 }
 
 interface Asset {
@@ -49,7 +54,7 @@ interface Asset {
 const statusVariants: Record<string, 'new' | 'confirmed' | 'false_positive'> = {
   new: 'new',
   confirmed: 'confirmed',
-  false_positive: 'false_positive',
+  // false_positive: 'false_positive',
 }
 
 export default function SSLCertificatesPage() {
@@ -69,11 +74,16 @@ export default function SSLCertificatesPage() {
     company_name: 'PNB',
     common_name: asset.assetName,
     valid_from: new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000).toISOString(),
+    valid_to: new Date(Date.now() + Math.random() * 365 * 24 * 60 * 60 * 1000).toISOString(),
     ssl_sha_fingerprint: `${Math.random().toString(36).substring(2, 15)}...`,
     detection_date: new Date().toISOString(),
     status: asset.certStatus === 'Valid' ? 'confirmed' : 'new',
     key_length: asset.keyLength,
     tls_version: asset.tlsVersion,
+    cipher_suite: asset.cipherSuite,
+    pqc_tier: asset.pqc_tier,
+    q_score: asset.q_score,
+    risk_label: asset.risk_label, 
   }))
 
   const filteredData = activeTab === 'all'
@@ -147,6 +157,17 @@ export default function SSLCertificatesPage() {
       ),
     },
     {
+      key: 'valid_to',
+      header: 'Valid To',
+      sortable: true,
+      render: (value) => (
+        <div className="flex items-center gap-1 text-sm text-muted-foreground">
+          <Clock className="h-3 w-3" />
+          {new Date(value as string).toLocaleDateString()}
+        </div>
+      ),
+    },
+    {
       key: 'ssl_sha_fingerprint',
       header: 'SHA Fingerprint',
       render: (value) => (
@@ -172,7 +193,7 @@ export default function SSLCertificatesPage() {
     total: sslCerts.length,
     new: sslCerts.filter(c => c.status === 'new').length,
     confirmed: sslCerts.filter(c => c.status === 'confirmed').length,
-    falsePositive: sslCerts.filter(c => c.status === 'false_positive').length,
+    // falsePositive: sslCerts.filter(c => c.status === 'false_positive').length,
   }
 
   return (
@@ -228,13 +249,13 @@ export default function SSLCertificatesPage() {
           </div>
           <p className="text-2xl font-bold font-mono text-elite">{stats.confirmed}</p>
         </div>
-        <div className="glass rounded-lg p-4 border border-border/50">
+        {/* <div className="glass rounded-lg p-4 border border-border/50">
           <div className="flex items-center gap-2 mb-2">
             <Clock className="h-4 w-4 text-muted-foreground" />
             <p className="text-xs text-muted-foreground">False Positive</p>
           </div>
           <p className="text-2xl font-bold font-mono text-muted-foreground">{stats.falsePositive}</p>
-        </div>
+        </div> */}
       </motion.div>
 
       {/* Tabs and Table */}
@@ -248,7 +269,7 @@ export default function SSLCertificatesPage() {
             <TabsTrigger value="all">All ({stats.total})</TabsTrigger>
             <TabsTrigger value="new">New ({stats.new})</TabsTrigger>
             <TabsTrigger value="confirmed">Confirmed ({stats.confirmed})</TabsTrigger>
-            <TabsTrigger value="false_positive">False Positive ({stats.falsePositive})</TabsTrigger>
+            {/* <TabsTrigger value="false_positive">False Positive ({stats.falsePositive})</TabsTrigger> */}
           </TabsList>
 
           <TabsContent value={activeTab} className="mt-4">

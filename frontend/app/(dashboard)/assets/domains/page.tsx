@@ -28,6 +28,8 @@ import {
 } from '@/components/ui/dialog'
 import { DataTable, StatusBadge, Column } from '@/components/tables/data-table'
 import { Spinner } from '@/components/ui/spinner'
+import Link from 'next/link'
+import { ArrowUpRight } from "lucide-react"
 
 interface Domain {
   id: number
@@ -171,31 +173,45 @@ export default function DomainsPage() {
       sortable: true,
       render: (_, row) => (
         <div className="flex items-center gap-2">
-          <span className="font-mono text-sm text-pnb-gold">
+          <span className="font-mono text-sm text-red-500 ">
             {row.total_assets || 0}
           </span>
         </div>
       ),
     },
     {
-      key: 'riskLevel',
-      header: 'Risk Level',
-      sortable: true,
-      render: (value) => {
-        const riskColors: Record<string, string> = {
-          low: 'bg-elite/20 text-elite',
-          medium: 'bg-pnb-gold/20 text-pnb-gold',
-          high: 'bg-critical/20 text-critical',
-          unknown: 'bg-muted/20 text-muted-foreground',
-        }
-        const risk = (value as string) || 'unknown'
-        return (
-          <span className={cn('px-2 py-1 rounded-full text-xs font-medium capitalize', riskColors[risk] || riskColors.unknown)}>
-            {risk}
-          </span>
-        )
-      },
-    },
+  key: 'view',
+  header: 'View',
+  className: 'w-16',
+  render: (_, row) => (
+<Link
+  href={`/domains/${row.id}`}
+  className="group inline-flex items-center gap-1 text-pnb-gold text-sm font-semibold"
+>
+  Details
+  <ArrowUpRight size={14} className="opacity-60 group-hover:opacity-100 transition" />
+</Link>
+  ),
+},
+    // {
+    //   key: 'riskLevel',
+    //   header: 'Risk Level',
+    //   sortable: true,
+    //   render: (value) => {
+    //     const riskColors: Record<string, string> = {
+    //       low: 'bg-elite/20 text-elite',
+    //       medium: 'bg-pnb-gold/20 text-pnb-gold',
+    //       high: 'bg-critical/20 text-critical',
+    //       unknown: 'bg-muted/20 text-muted-foreground',
+    //     }
+    //     const risk = (value as string) || 'unknown'
+    //     return (
+    //       <span className={cn('px-2 py-1 rounded-full text-xs font-medium capitalize', riskColors[risk] || riskColors.unknown)}>
+    //         {risk}
+    //       </span>
+    //     )
+    //   },
+    // },
     {
       key: 'actions',
       header: '',
