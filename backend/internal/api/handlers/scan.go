@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/AkshatGupta15/RandomShit/backend/internal/core/scanner"
 	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
@@ -121,5 +123,86 @@ func GetScanProgress(c *fiber.Ctx) error {
 		"total_assets":   domain.TotalAssets,
 		"scanned_assets": domain.ScannedAssets,
 		"percentage":     fmt.Sprintf("%.2f", percentage),
+	})
+}
+
+// GetDiscoveryFeed - GET /api/v1/scan/discovery-feed
+func GetDiscoveryFeed(c *fiber.Ctx) error {
+	domainID := c.QueryInt("domain_id", 0)
+	limit := c.QueryInt("limit", 20)
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	query := db.DB.Model(&models.Subdomain{}).
+		Where("is_alive = ?", true).
+		Preload("SSLCert").
+		Preload("Services").
+		Order("created_at desc").
+		Limit(limit)
+
+	if domainID > 0 {
+		query = query.Where("domain_id = ?", domainID)
+	}
+
+	var subdomains []models.Subdomain
+	if err := query.Find(&subdomains).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch discovery feed"})
+	}
+
+	data := make([]fiber.Map, 0, len(subdomains))
+	for _, sub := range subdomains {
+		assetType := "domain"
+		if sub.IPAddress != "" {
+			assetType = "ip"
+		}
+		if len(sub.Services) > 0 {
+			assetType = "software"
+		}
+		if sub.SSLCert != nil {
+			assetType = "ssl"
+		}
+
+		status := "standard"
+		if sub.SSLCert != nil {
+			tier := strings.ToLower(strings.TrimSpace(sub.SSLCert.PQCTier))
+			switch tier {
+			case "elite":
+				status = "elite"
+			case "legacy":
+				status = "legacy"
+			default:
+				status = "standard"
+			}
+
+			risk := strings.ToLower(strings.TrimSpace(sub.SSLCert.RiskLabel))
+			if strings.Contains(risk, "critical") || strings.Contains(risk, "high") {
+				status = "critical"
+			}
+		}
+
+		timestamp := sub.CreatedAt
+		if !sub.UpdatedAt.IsZero() && sub.UpdatedAt.After(timestamp) {
+			timestamp = sub.UpdatedAt
+		}
+		if timestamp.IsZero() {
+			timestamp = time.Now()
+		}
+
+		data = append(data, fiber.Map{
+			"id":        sub.ID,
+			"name":      sub.Hostname,
+			"type":      assetType,
+			"status":    status,
+			"timestamp": timestamp,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"count": len(data),
+		"data":  data,
 	})
 }

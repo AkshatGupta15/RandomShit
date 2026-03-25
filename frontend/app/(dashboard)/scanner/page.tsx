@@ -57,6 +57,14 @@ interface DiscoveredAsset {
   timestamp: Date
 }
 
+type DiscoveryFeedItem = {
+  id?: unknown
+  name?: unknown
+  type?: unknown
+  status?: unknown
+  timestamp?: unknown
+}
+
 function toNumber(value: unknown, fallback = 0): number {
   const num = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(num) ? num : fallback
@@ -74,13 +82,73 @@ export default function ScannerPage() {
   const [isStarting, setIsStarting] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
 
-  const { data: domainsResponse, isLoading: domainsLoading } = useSWR<{ data: Domain[] }>(
-    'domains',
+  const { data: domainsResponse, isLoading: domainsLoading } = useSWR<{ data: unknown[] }>(
+    'scanner-domains',
     () => api.domains.getAll(),
     { refreshInterval: 10000 }
   )
-  
-  const domains = domainsResponse?.data || []
+
+  const domains: Domain[] = (Array.isArray(domainsResponse?.data) ? domainsResponse.data : []).map((item) => {
+    const domain = item as Record<string, unknown>
+    return {
+      id: Number(domain.id ?? 0),
+      domain: (domain.domain as string | undefined) || (domain.domain_name as string | undefined) || '',
+      domain_name: (domain.domain_name as string | undefined) || (domain.domain as string | undefined) || '',
+      status: (domain.status as string | undefined) || 'unknown',
+      endpoints: Number(domain.endpoints ?? domain.total_assets ?? domain.scanned_assets ?? 0),
+      scanned_assets: Number(domain.scanned_assets ?? domain.endpoints ?? 0),
+      total_assets: Number(domain.total_assets ?? domain.scanned_assets ?? domain.endpoints ?? 0),
+      lastScanned:
+        (domain.lastScanned as string | null | undefined) ||
+        (domain.last_scanned as string | null | undefined) ||
+        null,
+      last_scanned:
+        (domain.last_scanned as string | null | undefined) ||
+        (domain.lastScanned as string | null | undefined) ||
+        null,
+      riskLevel: (domain.riskLevel as string | undefined) || (domain.risk_level as string | undefined) || 'unknown',
+    }
+  })
+
+  const pollDiscoveryFeed = useCallback(async () => {
+    if (!selectedDomainId) return
+
+    try {
+      const response = await api.getDiscoveryFeed(selectedDomainId, 20)
+      const rows = Array.isArray((response as { data?: unknown })?.data)
+        ? ((response as { data?: DiscoveryFeedItem[] }).data ?? [])
+        : []
+
+      const normalized = rows.map((item, index) => {
+        const rawType = typeof item.type === 'string' ? item.type.toLowerCase() : 'domain'
+        const type: DiscoveredAsset['type'] =
+          rawType === 'ssl' || rawType === 'ip' || rawType === 'software' || rawType === 'domain'
+            ? rawType
+            : 'domain'
+
+        const rawStatus = typeof item.status === 'string' ? item.status.toLowerCase() : 'standard'
+        const status: DiscoveredAsset['status'] =
+          rawStatus === 'elite' || rawStatus === 'legacy' || rawStatus === 'critical' || rawStatus === 'standard'
+            ? rawStatus
+            : 'standard'
+
+        const parsedTimestamp = item.timestamp ? new Date(String(item.timestamp)) : new Date()
+        const timestamp = Number.isNaN(parsedTimestamp.getTime()) ? new Date() : parsedTimestamp
+
+        return {
+          id: Number(item.id ?? index),
+          name: typeof item.name === 'string' && item.name.trim() ? item.name : 'unknown-asset',
+          type,
+          status,
+          timestamp,
+        }
+      })
+
+      setDiscoveredAssets(normalized)
+    } catch (error) {
+      console.error('Failed to fetch discovery feed:', error)
+    }
+  }, [selectedDomainId])
 
   // Poll scan status when scanning
   const pollScanStatus = useCallback(async () => {
@@ -100,20 +168,6 @@ export default function ScannerPage() {
         total_assets: totalAssets,
       })
 
-      // Simulate discovering assets
-      if (Math.random() > 0.7) {
-        const assetTypes: Array<'domain' | 'ssl' | 'ip' | 'software'> = ['domain', 'ssl', 'ip', 'software']
-        const statuses: Array<'elite' | 'standard' | 'legacy' | 'critical'> = ['elite', 'standard', 'legacy', 'critical']
-        const newAsset: DiscoveredAsset = {
-          id: Date.now(),
-          name: `asset-${Math.random().toString(36).substring(7)}.pnb.bank.in`,
-          type: assetTypes[Math.floor(Math.random() * assetTypes.length)],
-          status: statuses[Math.floor(Math.random() * statuses.length)],
-          timestamp: new Date(),
-        }
-        setDiscoveredAssets(prev => [newAsset, ...prev].slice(0, 10))
-      }
-
       if ((status as { status?: string }).status === 'completed' || percentage >= 100) {
         setScanStatus(prev => ({ ...prev, status: 'completed' }))
       }
@@ -128,6 +182,25 @@ export default function ScannerPage() {
       return () => clearInterval(interval)
     }
   }, [scanStatus.status, pollScanStatus])
+
+  useEffect(() => {
+    if (!selectedDomainId) {
+      setDiscoveredAssets([])
+      return
+    }
+
+    void pollDiscoveryFeed()
+  }, [selectedDomainId, pollDiscoveryFeed])
+
+  useEffect(() => {
+    if (scanStatus.status !== 'scanning') return
+
+    const interval = setInterval(() => {
+      void pollDiscoveryFeed()
+    }, 2500)
+
+    return () => clearInterval(interval)
+  }, [scanStatus.status, pollDiscoveryFeed])
 
   const handleStartScan = async () => {
     if (!selectedDomainId) return

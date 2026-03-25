@@ -664,12 +664,16 @@ getDomainSubdomains: async (id: number) => {
   },
 
   // Discovery feed for scanner
-  async getDiscoveryFeed() {
+  async getDiscoveryFeed(domainId?: number, limit = 20) {
     if (IS_DEMO_MODE) {
       await simulateDelay(100, 300)
       return { data: mockData.mockDiscoveryFeed }
     }
-    const res = await fetchWithTimeout(`${API_BASE_URL}/scan/discovery-feed`)
+    const query = new URLSearchParams()
+    if (domainId) query.set('domain_id', String(domainId))
+    if (limit > 0) query.set('limit', String(limit))
+    const qs = query.toString()
+    const res = await fetchWithTimeout(`${API_BASE_URL}/scan/discovery-feed${qs ? `?${qs}` : ''}`)
     if (!res.ok) await throwApiError(res, 'Failed to fetch discovery feed')
     return res.json()
   },
