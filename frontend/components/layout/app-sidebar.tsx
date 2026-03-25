@@ -57,13 +57,13 @@ const navigationItems = [
       { name: 'Software', href: '/assets/software', icon: FileText },
     ],
   },
-  {
-    title: 'Security',
-    items: [
-      { name: 'Crypto Inventory', href: '/crypto', icon: Lock },
-      { name: 'Reports', href: '/reports', icon: FileText },
-    ],
-  },
+  // {
+  //   title: 'Security',
+  //   items: [
+  //     { name: 'Crypto Inventory', href: '/crypto', icon: Lock },
+  //     { name: 'Reports', href: '/reports', icon: FileText },
+  //   ],
+  // },
   {
     title: 'System',
     items: [
