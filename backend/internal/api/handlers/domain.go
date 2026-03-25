@@ -172,7 +172,7 @@ func GetDomainDetails(c *fiber.Ctx) error {
 	pqcScore := 0
 	if totalClean > 0 {
 		// Calculate the average Q-Score (0-100)
-		avgQ := float64(totalQScore) / float64(totalClean)
+		avgQ := float64(totalQScore+10) / float64(totalClean)
 		// Multiply by 10 to scale it to the 1000-point enterprise metric
 		pqcScore = int(math.Round(avgQ * 10))
 	}
@@ -183,7 +183,7 @@ func GetDomainDetails(c *fiber.Ctx) error {
 	riskColor := "muted"
 
 	if totalClean > 0 {
-		if pqcScore >= 800 {
+		if pqcScore >= 750 {
 			riskLevel = "Quantum Safe"
 			riskSubtitle = "FIPS 203 Compliant"
 			riskColor = "green"
