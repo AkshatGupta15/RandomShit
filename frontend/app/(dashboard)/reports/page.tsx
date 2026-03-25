@@ -50,7 +50,7 @@ export default function ReportsPage() {
   const [isDownloadingPDF, setIsDownloadingPDF] = useState(false)
 
   const { data: domains, isLoading: domainsLoading } = useSWR<Domain[]>(
-    'domains',
+    'reports-domains',
     async () => {
       const response = await api.domains.getAll()
       const rows = Array.isArray(response) ? response : Array.isArray(response?.data) ? response.data : []
@@ -66,7 +66,8 @@ export default function ReportsPage() {
     }
   )
 
-  const selectedDomain = domains?.find(d => d.id === selectedDomainId)
+  const domainList = Array.isArray(domains) ? domains : []
+  const selectedDomain = domainList.find(d => d.id === selectedDomainId)
 
   const handleDownloadCBOM = async () => {
     if (!selectedDomainId) return
@@ -186,10 +187,10 @@ export default function ReportsPage() {
             <SelectContent className="glass border-border/50">
               {domainsLoading ? (
                 <SelectItem value="loading" disabled>Loading...</SelectItem>
-              ) : domains?.length === 0 ? (
+              ) : domainList.length === 0 ? (
                 <SelectItem value="none" disabled>No domains available</SelectItem>
               ) : (
-                domains?.map((domain) => (
+                domainList.map((domain) => (
                   <SelectItem key={domain.id} value={domain.id.toString()}>
                     <div className="flex items-center gap-2">
                       <Globe className="h-4 w-4 text-pnb-gold" />

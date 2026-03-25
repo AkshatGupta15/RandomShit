@@ -43,11 +43,19 @@ type Component struct {
 	CryptoProperties CryptoProps `json:"cryptoProperties,omitempty"`
 }
 
+//  ENHANCED: CycloneDX 1.6 PQC Fields added
 type CryptoProps struct {
-	AssetType         string `json:"assetType"`
-	Algorithm         string `json:"algorithm"`
-	SecurityLevel     string `json:"securityLevel"`
-	NistFipsCompliant bool   `json:"nistFipsCompliant"`
+	AssetType              string `json:"assetType"`
+	Type                   string `json:"type,omitempty"`
+	Primitive              string `json:"primitive,omitempty"`
+	Algorithm              string `json:"algorithm"`
+	ParameterSetIdentifier string `json:"parameterSetIdentifier,omitempty"`
+	ClassicalSecurityLevel int    `json:"classicalSecurityLevel,omitempty"`
+	SecurityLevel          string `json:"securityLevel"`
+	NistFipsCompliant      bool   `json:"nistFipsCompliant"`
+	ExecutionEnvironment   string `json:"executionEnvironment,omitempty"`
+	State                  string `json:"state,omitempty"`
+	OID                    string `json:"oid,omitempty"`
 }
 
 // ==========================================
@@ -115,10 +123,20 @@ func buildBaseCBOM(serial string, name string) CBOM {
 func buildComponent(sub models.Subdomain) Component {
 	isFips := sub.SSLCert.PQCTier == "Elite"
 	secLevel := "Legacy (Vulnerable)"
+	primitive := "signature"
+	algorithm := sub.SSLCert.KeyLength // e.g., "RSA 2048" or "ECDSA"
+	paramSet := ""
+	classSecLevel := 112 // Default for RSA 2048
+
 	if isFips {
 		secLevel = "NIST FIPS 203 (ML-KEM) Compliant"
+		primitive = "kem"
+		algorithm = "ML-KEM"
+		paramSet = "ML-KEM-768"
+		classSecLevel = 128
 	} else if sub.SSLCert.PQCTier == "Standard" {
 		secLevel = "Classical (Action Required)"
+		classSecLevel = 128
 	}
 
 	return Component{
@@ -127,17 +145,19 @@ func buildComponent(sub models.Subdomain) Component {
 		Version:     sub.SSLCert.TLSVersion,
 		Description: fmt.Sprintf("Certificate Issuer: %s", sub.SSLCert.Issuer),
 		CryptoProperties: CryptoProps{
-			AssetType:         "certificate",
-			Algorithm:         sub.SSLCert.KeyLength,
-			SecurityLevel:     secLevel,
-			NistFipsCompliant: isFips,
+			AssetType:              "protocol",
+			Type:                   "tls",
+			Primitive:              primitive,
+			Algorithm:              algorithm,
+			ParameterSetIdentifier: paramSet,
+			ClassicalSecurityLevel: classSecLevel,
+			SecurityLevel:          secLevel,
+			NistFipsCompliant:      isFips,
+			ExecutionEnvironment:   "software",
+			State:                  "active",
 		},
 	}
 }
-
-// ==========================================
-// GEMINI AI INTEGRATION
-// ==========================================
 func generateAIDescription(prompt string) string {
 	apiKey := os.Getenv("API_KEY")
 	if apiKey == "" {
@@ -342,9 +362,3 @@ Provide a concise, 2-paragraph executive summary. Focus on the immediate risk of
 	c.Set("Content-Type", "text/html")
 	return c.SendString(htmlContent)
 }
-
-// curl -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyDBKH5WGQKBSC_CNcukLMEmDKDCwLihT_4" \
-//   -H "Content-Type: application/json" \
-//   -d '{
-//     "contents": [{"parts":[{"text":"Hello, world"}]}]
-//   }'
