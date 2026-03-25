@@ -72,19 +72,29 @@ func ComputeFinalRisk(tlsVersion, cipherSuite, keyLength string, validTo time.Ti
 		scoreTLS = 0.5
 	}
 
-	scoreKex := 0.3
+	scoreKex := 0.2
 	for _, p := range pqcAlgorithms {
 		if strings.Contains(keyLength, p) || strings.Contains(cipherSuite, p) {
 			scoreKex = 1.0
 			break
 		}
 	}
-	if scoreKex < 1.0 {
-		if strings.Contains(keyLength, "ECDHE") || strings.Contains(keyLength, "X25519") {
-			scoreKex = 0.2
+	// PQC → best
+	for _, p := range pqcAlgorithms {
+		if strings.Contains(keyLength, p) || strings.Contains(cipherSuite, p) {
+			scoreKex = 1.0
+			break
 		}
 	}
 
+	// Classical strong
+	if scoreKex < 1.0 {
+		if strings.Contains(keyLength, "ECDHE") || strings.Contains(keyLength, "X25519") {
+			scoreKex = 0.8
+		} else if strings.Contains(keyLength, "RSA") {
+			scoreKex = 0.4
+		}
+	}
 	scoreCipher := 0.5
 	if strings.Contains(cipherSuite, "256") {
 		scoreCipher = 1.0
