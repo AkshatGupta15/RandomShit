@@ -86,11 +86,10 @@ func ComputeFinalRisk(tlsVersion, cipherSuite, keyLength string, validTo time.Ti
 			break
 		}
 	}
-
 	// Classical strong
 	if scoreKex < 1.0 {
-		if strings.Contains(keyLength, "ECDHE") || strings.Contains(keyLength, "X25519") {
-			scoreKex = 0.8
+		if strings.Contains(keyLength, "ECDHE") || strings.Contains(keyLength, "X25519") || strings.Contains(keyLength, "ECDSA") {
+			scoreKex = 0.8 //  FIX: Now ECDSA-256 gets 80% strength instead of 20%
 		} else if strings.Contains(keyLength, "RSA") {
 			scoreKex = 0.4
 		}

@@ -142,7 +142,7 @@ export default function DomainSubdomainsPage() {
     },
     {
       key: 'signature_algo',
-      header: 'Signature Algo',
+      header: 'Signature Algo / Issuer ',
       render: (_, row) => <span className="text-yellow-500 font-mono">{row.ssl_cert?.issuer || '-'}</span>
     },
     {
@@ -166,7 +166,7 @@ export default function DomainSubdomainsPage() {
     },
     {
       key: 'pqc_tier',
-      header: 'Risk Status', //  Renamed to match the data better
+      header: 'Risk Status', // 🟢 Renamed to match the data better
       render: (_, row) => {
         if (!row.ssl_cert) return <span className="text-muted-foreground">-</span>
 
