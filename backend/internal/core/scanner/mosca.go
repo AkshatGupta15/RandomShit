@@ -124,6 +124,9 @@ func ComputeFinalRisk(tlsVersion, cipherSuite, keyLength string, validTo time.Ti
 	// Apply Mosca Penalty (Defaulting to High-Risk Data: X=10, Y=3)
 	moscaPenalty := CalculateMoscaRisk(keyLength, 10, 3)
 	finalScore := qScore - (20.0 * moscaPenalty)
+	if finalScore > 60 {
+		finalScore += 15 // Bonus for strong crypto
+	}
 
 	if finalScore > 100 {
 		finalScore = 100

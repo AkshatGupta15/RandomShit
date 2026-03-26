@@ -1,6 +1,7 @@
 import { Metadata } from "next"
 import NetworkGraph from "@/components/dashboard/network-graph"
 import { Activity } from "lucide-react"
+import GeoMap from "@/components/dashboard/geo-map"
 
 export const metadata: Metadata = {
   title: "Topology Map | PNB Quantum Shield",
@@ -21,7 +22,7 @@ export default function NetworkPage() {
       </div>
 
       <div className="w-full">
-        <NetworkGraph />
+        <GeoMap />
       </div>
     </div>
   )
