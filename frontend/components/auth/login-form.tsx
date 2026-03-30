@@ -10,6 +10,15 @@ import { Spinner } from '@/components/ui/spinner'
 import { PNBLogo } from '@/components/icons/pnb-logo'
 import { useAuth } from '@/contexts/auth-context'
 import { api } from '@/lib/api'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 export function LoginForm() {
   const { login, verifyTwoFactor } = useAuth()
@@ -19,6 +28,7 @@ export function LoginForm() {
   const [otp, setOtp] = useState('')
   const [challengeId, setChallengeId] = useState<string | null>(null)
   const [otpHint, setOtpHint] = useState<string | null>(null)
+  const [showOtpDialog, setShowOtpDialog] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -35,6 +45,9 @@ export function LoginForm() {
         setChallengeId(result.challenge_id)
         setOtpHint(result.otp_hint ?? null)
         setLoginStep('otp')
+        if (result.otp_hint) {
+          setShowOtpDialog(true)
+        }
         return
       }
     } catch (err) {
@@ -68,6 +81,7 @@ export function LoginForm() {
     setChallengeId(null)
     setOtp('')
     setOtpHint(null)
+    setShowOtpDialog(false)
     setError(null)
   }
 
@@ -264,7 +278,7 @@ export function LoginForm() {
                     animate={{ opacity: 1, y: 0 }}
                     className="rounded-lg border border-pnb-gold/30 bg-pnb-gold/10 px-3 py-2"
                   >
-                    <p className="text-xs text-pnb-gold">Dev OTP: <span className="font-mono tracking-wider">{otpHint}</span></p>
+                    <p className="text-xs text-pnb-gold">OTP generated. Check alert dialog for the code.</p>
                   </motion.div>
                 )}
 
@@ -310,6 +324,22 @@ export function LoginForm() {
               </Button>
             </motion.div>
           </form>
+
+          <AlertDialog open={showOtpDialog} onOpenChange={setShowOtpDialog}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>One-Time Password</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Your OTP is <span className="font-mono font-semibold tracking-wider text-foreground">{otpHint}</span>. Use this code to complete login.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogAction onClick={() => setShowOtpDialog(false)}>
+                  Continue
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           {/* Security notice */}
           <motion.div

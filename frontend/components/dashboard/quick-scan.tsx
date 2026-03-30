@@ -56,9 +56,11 @@ const InfoTooltip = ({ content, children, className = '' }: { content: React.Rea
 )
 
 export default function QuickScanWidget() {
+  const COMPLETED_SUBSCAN_KEY = 'pnb_completed_subdomain_scan_domains'
   const [domainInput, setDomainInput] = useState('')
   const [activeDomainId, setActiveDomainId] = useState<number | null>(null)
   const [scanPhase, setScanPhase] = useState<ScanPhase>('idle')
+  const [hasCompletedSubScan, setHasCompletedSubScan] = useState(false)
   
   const [mainReport, setMainReport] = useState<EnrichedPQCReport | null>(null)
   const [subdomains, setSubdomains] = useState<SubdomainReport[]>([])
@@ -93,6 +95,27 @@ export default function QuickScanWidget() {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null
   }
 
+  const getCompletedSubScanDomainIds = (): number[] => {
+    if (typeof window === 'undefined') return []
+    try {
+      const raw = window.localStorage.getItem(COMPLETED_SUBSCAN_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
+    } catch {
+      return []
+    }
+  }
+
+  const markSubScanCompleted = (domainId: number) => {
+    if (typeof window === 'undefined') return
+    const ids = getCompletedSubScanDomainIds()
+    if (!ids.includes(domainId)) {
+      window.localStorage.setItem(COMPLETED_SUBSCAN_KEY, JSON.stringify([...ids, domainId]))
+    }
+  }
+
   const handleStartRootScan = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
     if (!domainInput.trim()) return
@@ -101,6 +124,7 @@ export default function QuickScanWidget() {
     setMainReport(null)
     setSubdomains([])
     setActiveDomainId(null)
+    setHasCompletedSubScan(false)
     setProgress({ scanned: 0, total: 0 })
 
     try {
@@ -123,6 +147,24 @@ export default function QuickScanWidget() {
       setMainReport(data.main_report)
       setActiveDomainId(resolvedDomainId)
       setScanPhase('root_completed')
+
+      if (resolvedDomainId) {
+        let persisted = getCompletedSubScanDomainIds().includes(resolvedDomainId)
+        if (!persisted) {
+          try {
+            const previous = await api.getScanStatus(resolvedDomainId)
+            const previousStatus = String((previous as any)?.status || '').toLowerCase()
+            const previousScanned = Number((previous as any)?.scanned_assets || 0)
+            if (previousStatus === 'completed' || previousScanned > 0) {
+              markSubScanCompleted(resolvedDomainId)
+              persisted = true
+            }
+          } catch {
+            // Ignore status lookup errors and continue with current flow.
+          }
+        }
+        setHasCompletedSubScan(persisted)
+      }
 
       if (!resolvedDomainId) {
         toast.error('Root scan succeeded but domain registration failed.')
@@ -191,6 +233,10 @@ export default function QuickScanWidget() {
 
           if (data.status === 'completed' || data.status === 'halted') {
             setScanPhase('sub_completed')
+            if (activeDomainId) {
+              markSubScanCompleted(activeDomainId)
+              setHasCompletedSubScan(true)
+            }
             toast.success('Infrastructure Audit Complete!')
           }
         } catch (error) {
@@ -203,8 +249,8 @@ export default function QuickScanWidget() {
   }, [activeDomainId, scanPhase])
 
   const handleDownloadCBOM = async () => {
-    if (!activeDomainId) {
-      toast.error('Run a scan first to generate CBOM.')
+    if (!activeDomainId || (!hasCompletedSubScan && scanPhase !== 'sub_completed')) {
+      toast.error('Complete subdomain scan first to generate CBOM.')
       return
     }
 
@@ -218,8 +264,8 @@ export default function QuickScanWidget() {
   }
 
   const handleDownloadReport = async () => {
-    if (!activeDomainId) {
-      toast.error('Run a scan first to export report.')
+    if (!activeDomainId || (!hasCompletedSubScan && scanPhase !== 'sub_completed')) {
+      toast.error('Complete subdomain scan first to export report.')
       return
     }
 
@@ -234,6 +280,7 @@ export default function QuickScanWidget() {
 
   const progressPercent = progress.total > 0 ? Math.round((progress.scanned / progress.total) * 100) : 0
   const isScanning = scanPhase === 'root_scanning' || scanPhase === 'sub_scanning'
+  const canDownloadExports = !!activeDomainId && (scanPhase === 'sub_completed' || hasCompletedSubScan)
 
   return (
     <div className={`${mainReport ? 'min-h-screen' : ''} bg-zinc-950 text-zinc-100 font-sans selection:bg-[#A31127]/30 p-4 sm:p-6 lg:p-8`}>
@@ -304,23 +351,38 @@ export default function QuickScanWidget() {
                 </div>
                 <p className="text-zinc-500 text-sm">Primary Domain Cryptographic Analysis Complete</p>
               </div>
-              <div className="flex gap-3 w-full sm:w-auto">
-                <button
-                  onClick={handleDownloadCBOM}
-                  disabled={!activeDomainId}
-                  title="Download Cryptographic Bill of Materials (JSON format)"
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
-                >
-                  <Download className="w-4 h-4 text-zinc-400" /> CBOM
-                </button>
-                <button
-                  onClick={handleDownloadReport}
-                  disabled={!activeDomainId}
-                  title="Download human-readable executive report"
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
-                >
-                  <FileText className="w-4 h-4 text-zinc-400" /> Report
-                </button>
+              <div className="w-full sm:w-auto flex flex-col items-stretch sm:items-end gap-1">
+                <div className="flex gap-3 w-full sm:w-auto">
+                  <div
+                    className="flex-1 sm:flex-none"
+                    title={canDownloadExports ? 'Download Cryptographic Bill of Materials (JSON format)' : 'Complete subdomain scan to enable CBOM export'}
+                  >
+                    <button
+                      onClick={handleDownloadCBOM}
+                      disabled={!canDownloadExports}
+                      className="w-full flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                    >
+                      <Download className="w-4 h-4 text-zinc-400" /> CBOM
+                    </button>
+                  </div>
+                  <div
+                    className="flex-1 sm:flex-none"
+                    title={canDownloadExports ? 'Download human-readable executive report' : 'Complete subdomain scan to enable report export'}
+                  >
+                    <button
+                      onClick={handleDownloadReport}
+                      disabled={!canDownloadExports}
+                      className="w-full flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                    >
+                      <FileText className="w-4 h-4 text-zinc-400" /> Report
+                    </button>
+                  </div>
+                </div>
+                {!canDownloadExports && (
+                  <p className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-2 py-1 text-right">
+                    Run Authorize Scan once to unlock CBOM and Report.
+                  </p>
+                )}
               </div>
             </div>
 

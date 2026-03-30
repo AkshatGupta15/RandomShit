@@ -18,6 +18,7 @@ import {
   FileJson,
   Printer,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -82,6 +83,7 @@ function toNumber(value: unknown, fallback = 0): number {
 }
 
 export default function ScannerPage() {
+  const COMPLETED_SUBSCAN_KEY = 'pnb_completed_subdomain_scan_domains'
   const [selectedDomainId, setSelectedDomainId] = useState<number | null>(null)
   const [scanStatus, setScanStatus] = useState<ScanStatus>({
     status: 'idle',
@@ -93,6 +95,7 @@ export default function ScannerPage() {
   const [discoveredAssets, setDiscoveredAssets] = useState<DiscoveredAsset[]>([])
   const [isStarting, setIsStarting] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
+  const [hasCompletedSubScan, setHasCompletedSubScan] = useState(false)
 
   const triggerUrlDownload = useCallback((url: string) => {
     const link = document.createElement('a')
@@ -172,6 +175,27 @@ export default function ScannerPage() {
     }
   }, [selectedDomainId])
 
+  const getCompletedSubScanDomainIds = useCallback((): number[] => {
+    if (typeof window === 'undefined') return []
+    try {
+      const raw = window.localStorage.getItem(COMPLETED_SUBSCAN_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      return parsed.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
+    } catch {
+      return []
+    }
+  }, [])
+
+  const markSubScanCompleted = useCallback((domainId: number) => {
+    if (typeof window === 'undefined') return
+    const ids = getCompletedSubScanDomainIds()
+    if (!ids.includes(domainId)) {
+      window.localStorage.setItem(COMPLETED_SUBSCAN_KEY, JSON.stringify([...ids, domainId]))
+    }
+  }, [getCompletedSubScanDomainIds])
+
   // Poll scan status when scanning
   const pollScanStatus = useCallback(async () => {
     if (!selectedDomainId || scanStatus.status !== 'subdomain_scanning') return
@@ -189,6 +213,11 @@ export default function ScannerPage() {
         scanned_assets: scannedAssets,
         total_assets: totalAssets,
       })
+
+      if ((status as { status?: string }).status === 'completed') {
+        markSubScanCompleted(selectedDomainId)
+        setHasCompletedSubScan(true)
+      }
 
       const subdomains = Array.isArray((status as { subdomains?: unknown[] }).subdomains)
         ? ((status as { subdomains?: Array<Record<string, unknown>> }).subdomains ?? [])
@@ -240,6 +269,35 @@ export default function ScannerPage() {
       console.error('Failed to poll scan status:', error)
     }
   }, [selectedDomainId, scanStatus.status])
+
+  useEffect(() => {
+    if (!selectedDomainId) {
+      setHasCompletedSubScan(false)
+      return
+    }
+
+    let mounted = true
+    const persisted = getCompletedSubScanDomainIds().includes(selectedDomainId)
+    setHasCompletedSubScan(persisted)
+
+    void (async () => {
+      try {
+        const status = await api.getScanStatus(selectedDomainId)
+        const apiStatus = String((status as { status?: unknown }).status || '').toLowerCase()
+        const apiScanned = toNumber((status as { scanned_assets?: unknown }).scanned_assets, 0)
+        if (mounted && (apiStatus === 'completed' || apiScanned > 0)) {
+          markSubScanCompleted(selectedDomainId)
+          setHasCompletedSubScan(true)
+        }
+      } catch {
+        // Ignore availability check errors.
+      }
+    })()
+
+    return () => {
+      mounted = false
+    }
+  }, [selectedDomainId, getCompletedSubScanDomainIds, markSubScanCompleted])
 
   useEffect(() => {
     if (scanStatus.status === 'subdomain_scanning') {
@@ -334,7 +392,14 @@ export default function ScannerPage() {
   }
 
   const handleDownloadCBOM = async () => {
-    if (!selectedDomainId) return
+    if (!selectedDomainId) {
+      toast.error('Select a domain first.')
+      return
+    }
+    if (!hasCompletedSubScan && scanStatus.status !== 'completed') {
+      toast.info('Run subdomain scan first to enable CBOM export.')
+      return
+    }
 
     try {
       triggerUrlDownload(api.getCBOMDownloadUrl(selectedDomainId))
@@ -344,7 +409,14 @@ export default function ScannerPage() {
   }
 
   const handleDownloadReport = async () => {
-    if (!selectedDomainId) return
+    if (!selectedDomainId) {
+      toast.error('Select a domain first.')
+      return
+    }
+    if (!hasCompletedSubScan && scanStatus.status !== 'completed') {
+      toast.info('Run subdomain scan first to enable report export.')
+      return
+    }
 
     try {
       triggerUrlDownload(api.getPDFReportDownloadUrl(selectedDomainId))
@@ -355,6 +427,7 @@ export default function ScannerPage() {
 
   const selectedDomain = domains?.find(d => d.id === selectedDomainId)
   const isScanning = scanStatus.status === 'root_scanning' || scanStatus.status === 'subdomain_scanning'
+  const canDownloadExports = !!selectedDomainId && (scanStatus.status === 'completed' || hasCompletedSubScan)
 
   const getAssetIcon = (type: string) => {
     switch (type) {
@@ -559,47 +632,64 @@ export default function ScannerPage() {
             </div>
           </div>
 
-          {rootScanReport && (
+          {(rootScanReport || canDownloadExports) && (
             <div className="glass rounded-xl p-6 border border-border/50">
               <h3 className="text-sm font-medium text-muted-foreground mb-4">Root Domain Analysis</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-4">
                 <div className="p-3 rounded-lg bg-secondary/30">
                   <p className="text-xs text-muted-foreground mb-1">Algorithm</p>
-                  <p className="font-mono text-foreground">{rootScanReport.detected_algorithm || 'Unknown'}</p>
+                  <p className="font-mono text-foreground">{rootScanReport?.detected_algorithm || 'Unknown'}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-secondary/30">
                   <p className="text-xs text-muted-foreground mb-1">TLS Version</p>
-                  <p className="font-mono text-foreground">{rootScanReport.tls_version || 'Unknown'}</p>
+                  <p className="font-mono text-foreground">{rootScanReport?.tls_version || 'Unknown'}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-secondary/30">
                   <p className="text-xs text-muted-foreground mb-1">Security Score</p>
-                  <p className="font-mono text-pnb-gold">{toNumber(rootScanReport.security_score, 0)}</p>
+                  <p className="font-mono text-pnb-gold">{toNumber(rootScanReport?.security_score, 0)}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-secondary/30">
                   <p className="text-xs text-muted-foreground mb-1">Issuer</p>
-                  <p className="font-mono text-foreground truncate">{rootScanReport.cert_issuer || 'Unknown'}</p>
+                  <p className="font-mono text-foreground truncate">{rootScanReport?.cert_issuer || 'Unknown'}</p>
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button
-                  onClick={handleDownloadCBOM}
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 gap-2"
+                <div
+                  className="flex-1"
+                  title={canDownloadExports ? 'Download CBOM JSON' : 'Run subdomain scan to enable CBOM export'}
                 >
-                  <FileJson className="h-4 w-4" />
-                  Download CBOM
-                </Button>
-                <Button
-                  onClick={handleDownloadReport}
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 gap-2"
+                  <Button
+                    onClick={handleDownloadCBOM}
+                    variant="outline"
+                    size="sm"
+                    disabled={!canDownloadExports}
+                    className="w-full gap-2"
+                  >
+                    <FileJson className="h-4 w-4" />
+                    Download CBOM
+                  </Button>
+                </div>
+                <div
+                  className="flex-1"
+                  title={canDownloadExports ? 'Download executive PDF report' : 'Run subdomain scan to enable report export'}
                 >
-                  <Printer className="h-4 w-4" />
-                  Download Report
-                </Button>
+                  <Button
+                    onClick={handleDownloadReport}
+                    variant="outline"
+                    size="sm"
+                    disabled={!canDownloadExports}
+                    className="w-full gap-2"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Download Report
+                  </Button>
+                </div>
               </div>
+              {!canDownloadExports && (
+                <p className="mt-2 text-[10px] text-muted-foreground">
+                  Run subdomain scan once to unlock CBOM and Report.
+                </p>
+              )}
             </div>
           )}
         </div>
