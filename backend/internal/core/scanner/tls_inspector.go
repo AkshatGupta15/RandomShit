@@ -20,6 +20,8 @@ type EnrichedPQCReport struct {
 	ValidTo           time.Time `json:"valid_to"`
 	QDayRisk          int       `json:"q_day_risk"`
 	SecurityScore     int       `json:"security_score"`
+	ScoreBreakdown    []string  `json:"score_breakdown"` // 🟢 NEW: Mathematical Proof
+	LaymanSummary     string    `json:"layman_summary"`
 	QKDStatus         string    `json:"qkd_status"`
 	HandshakeText     string    `json:"handshake_text"`
 	ThreatLevel       int       `json:"threat_level"`
@@ -29,9 +31,9 @@ type EnrichedPQCReport struct {
 }
 
 const CurveKyber768Draft = tls.CurveID(0x6399)
-var kyberPubKeySize = 1184 // Must be var to prevent compile-time byte overflow
 
-// PerformDeepTLSScan runs a two-stage TLS probe
+var kyberPubKeySize = 1184
+
 func PerformDeepTLSScan(hostname string, ip string) EnrichedPQCReport {
 	report := EnrichedPQCReport{
 		Hostname:         hostname,
@@ -40,6 +42,7 @@ func PerformDeepTLSScan(hostname string, ip string) EnrichedPQCReport {
 		ValidTo:          time.Now(),
 		HardeningRoadmap: []string{},
 		LegacyWeaknesses: []string{},
+		ScoreBreakdown:   []string{},
 		CertIssuer:       "Unknown",
 	}
 
@@ -49,14 +52,13 @@ func PerformDeepTLSScan(hostname string, ip string) EnrichedPQCReport {
 	}
 	log.Printf("[*] Probing TLS for %s", target)
 
-	// ── Stage 1: Standard Go native TLS handshake ─────────────────────────────
 	config := &tls.Config{
 		ServerName: hostname,
 		CurvePreferences: []tls.CurveID{
-			tls.X25519MLKEM768, // Final NIST FIPS 203
-			CurveKyber768Draft, // Legacy Draft 0x6399
-			tls.X25519,         // Classical fallback
-			tls.CurveP256,      // Classical fallback
+			tls.X25519MLKEM768,
+			CurveKyber768Draft,
+			tls.X25519,
+			tls.CurveP256,
 		},
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: true,
@@ -64,12 +66,11 @@ func PerformDeepTLSScan(hostname string, ip string) EnrichedPQCReport {
 
 	dialer := &net.Dialer{Timeout: 4 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, config)
-	
+
 	if err != nil {
 		report.DetectedAlgorithm = "OFFLINE"
-		report.HandshakeText = "Could not establish a TLS connection. Host may be offline or blocking probes."
 		report.SecurityScore = 0
-		report.ThreatLevel = 100
+		report.LaymanSummary = "We could not connect to this website. It may be offline or blocking our security scanners."
 		return report
 	}
 	defer conn.Close()
@@ -78,68 +79,89 @@ func PerformDeepTLSScan(hostname string, ip string) EnrichedPQCReport {
 	report.TLSVersion = tls.VersionName(state.Version)
 	report.CipherSuite = tls.CipherSuiteName(state.CipherSuite)
 
-	// Extract certificate metadata
+	// 🟢 DETERMINISTIC SCORING ENGINE 🟢
+	nistScore := 100
+	qDayRisk := 0
+	report.ScoreBreakdown = append(report.ScoreBreakdown, "Base NIST Score: 100")
+
+	// 1. Protocol Math
+	if report.TLSVersion == "TLS 1.2" || report.TLSVersion == "TLS 1.0" || report.TLSVersion == "TLS 1.1" {
+		nistScore -= 15
+		qDayRisk += 10
+		report.ScoreBreakdown = append(report.ScoreBreakdown, "[-15] Outdated Transport Protocol (TLS 1.2 or lower)")
+		report.LegacyWeaknesses = append(report.LegacyWeaknesses, fmt.Sprintf("Using outdated protocol: %s", report.TLSVersion))
+	}
+
+	// 2. Certificate Math (Authentication)
 	if len(state.PeerCertificates) > 0 {
 		cert := state.PeerCertificates[0]
 		report.ValidTo = cert.NotAfter
 		if len(cert.Issuer.Organization) > 0 {
 			report.CertIssuer = cert.Issuer.Organization[0]
 		}
+
 		pkAlgo := cert.PublicKeyAlgorithm.String()
-		if strings.Contains(pkAlgo, "ECDSA") {
-			report.LegacyWeaknesses = append(report.LegacyWeaknesses, "Legacy ECDSA certificate (quantum-vulnerable signing)")
-		} else {
-			report.LegacyWeaknesses = append(report.LegacyWeaknesses, "Classic RSA certificate (quantum-vulnerable signing)")
+		if strings.Contains(pkAlgo, "RSA") || strings.Contains(pkAlgo, "ECDSA") {
+			nistScore -= 5 // Small penalty. We want ML-DSA (FIPS 204) for perfect score.
+			report.ScoreBreakdown = append(report.ScoreBreakdown, fmt.Sprintf("[-5] Legacy Identity Certificate (%s)", pkAlgo))
+			report.LegacyWeaknesses = append(report.LegacyWeaknesses, fmt.Sprintf("Vulnerable Signature Algorithm: %s", pkAlgo))
+			report.HardeningRoadmap = append(report.HardeningRoadmap, "Upgrade identity certificates to Post-Quantum ML-DSA (FIPS 204)")
 		}
-		report.HardeningRoadmap = append(report.HardeningRoadmap, "Transition to ML-DSA (FIPS 204) for server authentication")
 	}
 
-	// ── Stage 2: Evaluate Key Exchange & Force Hybrid Detection ──────────────
+	// 3. Key Exchange Math (Confidentiality & HNDL Risk)
 	if state.CurveID == tls.X25519MLKEM768 {
 		report.IsPQCEnabled = true
-		report.DetectedAlgorithm = "X25519+ML-KEM-768 (FIPS 203)"
-		report.QDayRisk = 10
-		report.SecurityScore = 98
-		report.ThreatLevel = 10
-		report.Readiness = 98
-		report.HandshakeText = fmt.Sprintf("Connection negotiated using %s hybrid key exchange over %s. Final NIST standard in effect.", report.DetectedAlgorithm, report.TLSVersion)
-		report.LegacyWeaknesses = append(report.LegacyWeaknesses, "ECC P-256 fallback still advertised (compatibility risk)")
-		report.HardeningRoadmap = append(report.HardeningRoadmap, "Implement SLH-DSA for long-term root identity assurance")
+		report.DetectedAlgorithm = "X25519+ML-KEM-768"
+		qDayRisk += 5 // Minimum baseline risk
+		report.ScoreBreakdown = append(report.ScoreBreakdown, "[+0] Perfect Post-Quantum Key Encapsulation (FIPS 203)")
+		report.LaymanSummary = "Excellent security. This website uses military-grade, next-generation encryption. Even a future super-quantum computer cannot break into this connection."
+		report.HandshakeText = "NIST FIPS 203 Hybrid Key Encapsulation successfully negotiated."
 
 	} else if state.CurveID == tls.X25519 {
-		// 🔴 The network downgraded us to classical. We must FORCE the Quantum Check!
-		log.Printf("[!] Classical fallback detected on %s. Injecting Raw Kyber Probe...", hostname)
-		
+		// Attempt Raw Packet Trap for Draft Kyber
 		if probeDraftKyber(hostname, ip) {
 			report.IsPQCEnabled = true
-			report.DetectedAlgorithm = "X25519+Kyber768 (Draft 0x6399)"
-			report.QDayRisk = 15
-			report.SecurityScore = 93
-			report.ThreatLevel = 15
-			report.Readiness = 88
-			report.HandshakeText = fmt.Sprintf("Server supports Kyber768 Draft hybrid (0x6399) over %s. Detected via raw packet injection bypass. Migration to final ML-KEM-768 (FIPS 203) is recommended.", report.TLSVersion)
-			report.HardeningRoadmap = append(report.HardeningRoadmap, "Migrate from Kyber Draft (0x6399) to final ML-KEM-768 (FIPS 203)")
+			nistScore -= 5
+			qDayRisk += 15
+			report.DetectedAlgorithm = "Kyber768 (Draft)"
+			report.ScoreBreakdown = append(report.ScoreBreakdown, "[-5] Using Draft PQC implementation instead of Final Standard")
+			report.LaymanSummary = "Good security. This website is using an early version of quantum-proof encryption. It is safe from quantum attacks, but their IT team needs to update to the final 2024 standard."
+			report.HandshakeText = "Draft Kyber (0x6399) detected via packet injection."
+			report.HardeningRoadmap = append(report.HardeningRoadmap, "Update from Kyber Draft to Final ML-KEM-768")
 		} else {
 			report.IsPQCEnabled = false
-			report.DetectedAlgorithm = "X25519 (Classical)"
-			report.QDayRisk = 65
-			report.SecurityScore = 60
-			report.ThreatLevel = 65
-			report.Readiness = 40
-			report.HandshakeText = fmt.Sprintf("Standard elliptic curve key exchange (%s) negotiated over %s. Vulnerable to Shor's Algorithm.", report.DetectedAlgorithm, report.TLSVersion)
-			report.HardeningRoadmap = append(report.HardeningRoadmap, "Upgrade server to support ML-KEM-768 (FIPS 203) Key Encapsulation Mechanism")
+			nistScore -= 35
+			qDayRisk += 65
+			report.DetectedAlgorithm = "X25519 (Standard ECC)"
+			report.ScoreBreakdown = append(report.ScoreBreakdown, "[-35] Highly Vulnerable Classical Key Exchange (No PQC)")
+			report.LaymanSummary = "Warning: This website uses standard encryption. While safe today, foreign hackers could be recording this data right now to easily decrypt it when quantum computers are built in a few years (Harvest Now, Decrypt Later)."
+			report.HandshakeText = "Standard Elliptic Curve negotiated. Mathematically vulnerable to Shor's Algorithm."
+			report.HardeningRoadmap = append(report.HardeningRoadmap, "Enable FIPS 203 Post-Quantum Key Exchange immediately")
 		}
-
 	} else {
 		report.IsPQCEnabled = false
+		nistScore -= 50
+		qDayRisk += 95
 		report.DetectedAlgorithm = fmt.Sprintf("Legacy (%s)", tls.CurveID(state.CurveID).String())
-		report.QDayRisk = 95
-		report.SecurityScore = 20
-		report.ThreatLevel = 95
-		report.Readiness = 10
-		report.HandshakeText = fmt.Sprintf("Legacy cryptography negotiated (cipher: %s). Highly vulnerable to HNDL attacks.", report.CipherSuite)
-		report.HardeningRoadmap = append(report.HardeningRoadmap, "Immediate upgrade to Hybrid Post-Quantum Key Exchange required")
+		report.ScoreBreakdown = append(report.ScoreBreakdown, "[-50] Deprecated Legacy Key Exchange")
+		report.LaymanSummary = "Critical Risk: This website is using severely outdated security. It is highly vulnerable to modern attacks and completely defenseless against future quantum threats."
+		report.HandshakeText = fmt.Sprintf("Legacy %s cipher negotiated. Deprecated by modern standards.", report.CipherSuite)
+		report.HardeningRoadmap = append(report.HardeningRoadmap, "Emergency upgrade to modern TLS 1.3 and Hybrid PQC")
 	}
+
+	// Calculate Final
+	if nistScore < 0 {
+		nistScore = 0
+	}
+	if qDayRisk > 100 {
+		qDayRisk = 100
+	}
+
+	report.SecurityScore = nistScore
+	report.QDayRisk = qDayRisk
+	report.ThreatLevel = qDayRisk
+	report.Readiness = nistScore
 
 	return report
 }
@@ -176,7 +198,7 @@ func probeDraftKyber(hostname, ip string) bool {
 	if recLen <= 0 || recLen > 65535 {
 		return false
 	}
-	
+
 	recBody := make([]byte, recLen)
 	if err := readFull(conn, recBody); err != nil {
 		return false

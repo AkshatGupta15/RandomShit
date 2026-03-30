@@ -22,6 +22,7 @@ func SetupRoutes(app *fiber.App) {
 	// ==========================================
 	auth := v1.Group("/auth")
 	auth.Post("/login", handlers.LoginUser)
+	auth.Post("/verify-2fa", handlers.VerifyTwoFactor)
 	auth.Post("/logout", handlers.LogoutUser)
 	auth.Get("/me", handlers.GetSessionUser)
 	auth.Post("/register", handlers.RegisterUser)

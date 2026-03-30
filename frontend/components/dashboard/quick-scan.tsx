@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { 
-  Search, Loader2, ShieldCheck, Cpu, Lock, TriangleAlert, Zap,
-  Activity, Globe, Download, CheckCircle2, Radar, Target
+  Search, Loader2, ShieldCheck, Cpu, Lock, TriangleAlert, Zap, FileText,
+  Activity, Globe, Download, CheckCircle2, Radar, Target, BookOpen, HelpCircle, Info, ChevronRight, Server
 } from 'lucide-react'
 import { toast } from 'sonner' 
 import { api } from '@/lib/api'
@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-// Maps exactly to the EnrichedPQCReport from your Go backend
+// --- Interfaces ---
 interface EnrichedPQCReport {
   hostname: string
   is_pqc_enabled: boolean
@@ -23,6 +23,8 @@ interface EnrichedPQCReport {
   tls_version: string
   q_day_risk: number
   security_score: number
+  score_breakdown: string[]
+  layman_summary?: string
   qkd_status: string
   handshake_text: string
   threat_level: number
@@ -31,7 +33,6 @@ interface EnrichedPQCReport {
   legacy_weaknesses: string[]
 }
 
-// Maps to the Subdomain models returned by your CheckScanStatus API
 interface SubdomainReport {
   hostname: string
   detected_algorithm: string
@@ -42,6 +43,17 @@ interface SubdomainReport {
 }
 
 type ScanPhase = 'idle' | 'root_scanning' | 'root_completed' | 'sub_scanning' | 'sub_completed'
+
+// --- Reusable Tooltip Component ---
+const InfoTooltip = ({ content, children, className = '' }: { content: React.ReactNode, children: React.ReactNode, className?: string }) => (
+  <div className={`group relative inline-flex items-center cursor-help ${className}`}>
+    {children}
+    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 sm:w-64 bg-zinc-800 text-zinc-300 text-xs p-3 rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 shadow-2xl border border-zinc-700 pointer-events-none normal-case font-sans font-normal tracking-normal text-left">
+      {content}
+      <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-zinc-800" />
+    </div>
+  </div>
+)
 
 export default function QuickScanWidget() {
   const [domainInput, setDomainInput] = useState('')
@@ -59,7 +71,6 @@ export default function QuickScanWidget() {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null
   }
 
-  // 🟢 Phase 1: Scan Root Domain Instantly
   const handleStartRootScan = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
     if (!domainInput.trim()) return
@@ -83,9 +94,7 @@ export default function QuickScanWidget() {
         })
         if (match) {
           const parsed = Number(match.id)
-          if (Number.isFinite(parsed) && parsed > 0) {
-            resolvedDomainId = parsed
-          }
+          if (Number.isFinite(parsed) && parsed > 0) resolvedDomainId = parsed
         }
       }
       
@@ -94,44 +103,37 @@ export default function QuickScanWidget() {
       setScanPhase('root_completed')
 
       if (!resolvedDomainId) {
-        toast.error('Root scan succeeded but no domain id was returned. Please add the domain in inventory and try again.')
+        toast.error('Root scan succeeded but domain registration failed.')
       }
       
-      toast.success(`Root Analysis Complete`, {
-        description: `Domain ${domainInput} has been verified.`,
-        icon: <ShieldCheck className="text-green-500" />
+      toast.success(`Primary Audit Complete`, {
+        icon: <ShieldCheck className="text-emerald-500" />
       })
       
     } catch (error) {
       console.error(error)
-      toast.error("Failed to initiate scan. Is the backend running?")
+      toast.error("Failed to initiate secure connection. Verify target status.")
       setScanPhase('idle')
     }
   }
 
-  // 🟢 Phase 2: User Authorizes Deep Subdomain OSINT Scan
   const handleLaunchSubdomainScan = async () => {
     if (!activeDomainId) {
-      toast.error('Cannot start subdomain scan: missing domain id from root scan response.')
+      toast.error('Cannot authorize deep scan: missing domain tracking ID.')
       return
     }
 
     setScanPhase('sub_scanning')
-    toast.info("OSINT Pipeline Launched", {
-      description: "Discovering and analyzing infrastructure...",
-      icon: <Radar className="text-purple-400" />
-    })
+    toast.info("Comprehensive Audit Initiated")
 
     try {
       await api.startSubdomainScan(activeDomainId)
-      // The useEffect polling will take over from here to watch the background worker
     } catch (error) {
-      toast.error("Failed to launch subdomain scanner.")
+      toast.error("Failed to launch infrastructure scanner.")
       setScanPhase('root_completed')
     }
   }
 
-  // 🟢 Phase 3: Poll for Background Progress
   useEffect(() => {
     let interval: NodeJS.Timeout
 
@@ -140,12 +142,10 @@ export default function QuickScanWidget() {
         try {
           const data = await api.getScanStatus(activeDomainId)
 
-          // Track live numerical progress
           const scanned = data.scanned_assets || data.ScannedAssets || 0
           const total = data.total_assets || data.TotalAssets || 0
           setProgress({ scanned, total })
 
-          // Map the incoming database structures safely (handling casing differences)
           const formattedSubs = (data.subdomains || [])
             .filter((sub: any) => sub.ssl_cert || sub.SSLCert)
             .map((sub: any) => {
@@ -162,416 +162,450 @@ export default function QuickScanWidget() {
 
           const uniqueByHostname = new Map<string, SubdomainReport>()
           for (const item of formattedSubs) {
-            if (item.hostname && !uniqueByHostname.has(item.hostname)) {
-              uniqueByHostname.set(item.hostname, item)
-            }
+            if (item.hostname && !uniqueByHostname.has(item.hostname)) uniqueByHostname.set(item.hostname, item)
           }
 
           setSubdomains(Array.from(uniqueByHostname.values()))
 
-          // Finish the scan
           if (data.status === 'completed' || data.status === 'halted') {
             setScanPhase('sub_completed')
-            toast.success('OSINT Pipeline Complete!', {
-              description: `Successfully discovered and analyzed ${formattedSubs.length} live endpoints.`,
-              icon: <CheckCircle2 className="text-green-500" />
-            })
+            toast.success('Infrastructure Audit Complete!')
           }
         } catch (error) {
           console.error("Polling error", error)
         }
-      }, 2000) // 2-second polling for smooth progress bars
+      }, 2000)
     }
 
     return () => clearInterval(interval)
   }, [activeDomainId, scanPhase])
 
-  const downloadCBOM = () => {
-    if (!mainReport) return;
-    const cbomData = {
-      bomFormat: "CycloneDX-Crypto",
-      specVersion: "1.5",
-      serialNumber: `urn:uuid:${crypto.randomUUID()}`,
-      version: 1,
-      metadata: {
-        timestamp: new Date().toISOString(),
-        tools: [{ vendor: "PNB Quantum Shield", name: "Enterprise OSINT Engine", version: "2.0.0" }],
-        targetDomain: domainInput
-      },
-      components: [
-        {
-          type: "cryptographic-asset",
-          name: mainReport.hostname,
-          cryptoProperties: {
-            protocol: mainReport.tls_version,
-            keyExchange: mainReport.detected_algorithm,
-            quantumSafe: mainReport.is_pqc_enabled,
-            securityScore: mainReport.security_score,
-            vulnerabilities: mainReport.legacy_weaknesses
-          }
-        },
-        ...subdomains.map(sub => ({
-          type: "cryptographic-asset",
-          name: sub.hostname,
-          cryptoProperties: {
-            protocol: sub.tls_version,
-            keyExchange: sub.detected_algorithm,
-            quantumSafe: sub.is_pqc_enabled,
-            securityScore: sub.security_score,
-          }
-        }))
-      ]
-    }
-    const blob = new Blob([JSON.stringify(cbomData, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `CBOM_${domainInput}_${new Date().getTime()}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
   const progressPercent = progress.total > 0 ? Math.round((progress.scanned / progress.total) * 100) : 0
   const isScanning = scanPhase === 'root_scanning' || scanPhase === 'sub_scanning'
-  const safeSubdomains = subdomains.filter((sub) => sub.is_pqc_enabled).length
 
   return (
-    <div className="space-y-6 w-full max-w-6xl mx-auto">
-      {/* Search Input Area */}
-      <div className="bg-[#0f1219] p-6 rounded-2xl border border-white/5 shadow-2xl">
-        <h2 className="text-xl font-bold text-white mb-2">Enterprise Verification Engine</h2>
-        <p className="text-white/50 text-sm mb-4">Execute live NIST FIPS 203 handshakes across the root domain and dynamically discovered subdomains.</p>
-        <form onSubmit={handleStartRootScan} className="flex gap-3 mt-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
-            <input 
-              type="text" 
-              placeholder="e.g., targetdomain.com"
-              value={domainInput}
-              onChange={(e) => setDomainInput(e.target.value)}
-              className="w-full bg-[#161b22] border border-white/10 text-white rounded-xl pl-11 pr-4 py-3 focus:outline-none focus:border-blue-500 transition-colors font-mono text-sm"
-              disabled={isScanning}
-            />
-          </div>
-          <button 
-            type="submit"
-            disabled={isScanning || !domainInput}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2 disabled:opacity-50 min-w-[180px] justify-center"
-          >
-            {scanPhase === 'root_scanning' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-            {scanPhase === 'root_scanning' ? 'Analyzing Root...' : 'Scan Target'}
-          </button>
-        </form>
-      </div>
-
-      {/* Main Results Dashboard */}
-      {mainReport && (
-        <div className="bg-[#0f1219] rounded-2xl border border-white/5 p-8 shadow-2xl text-white animate-in fade-in slide-in-from-bottom-4 duration-500">
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-            <div className="rounded-xl border border-white/10 bg-[#161b22] p-3">
-              <p className="text-[11px] uppercase tracking-wide text-white/50">Selected Domain</p>
-              <p className="mt-1 text-sm font-mono text-white/90 truncate">{mainReport.hostname}</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-[#161b22] p-3">
-              <p className="text-[11px] uppercase tracking-wide text-white/50">Subdomains Analyzed</p>
-              <p className="mt-1 text-lg font-semibold text-white">{subdomains.length}</p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-[#161b22] p-3">
-              <p className="text-[11px] uppercase tracking-wide text-white/50">PQC Safe Subdomains</p>
-              <p className="mt-1 text-lg font-semibold text-green-400">{safeSubdomains}</p>
-            </div>
-          </div>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-[#A31127]/30 p-4 sm:p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        
+        {/* TOP CONTROL BAR */}
+        <header className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/50 rounded-2xl p-4 sm:p-6 shadow-lg flex flex-col lg:flex-row gap-6 justify-between items-center relative overflow-hidden">
+          <div className="absolute top-0 right-1/4 w-96 h-96 bg-[#F5A623]/5 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute bottom-0 left-1/4 w-96 h-96 bg-[#A31127]/5 rounded-full blur-3xl pointer-events-none" />
           
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-            <div>
-              <div className="flex items-center gap-4 mb-2">
-                <h1 className="text-3xl font-bold">Root Domain Results</h1>
-                {mainReport.is_pqc_enabled ? (
-                  <span className="flex items-center gap-1.5 px-3 py-1 border border-[#4ade80]/30 text-[#4ade80] bg-[#4ade80]/10 rounded-full text-xs font-bold tracking-wider">
-                    <ShieldCheck className="w-4 h-4" /> PQC ENABLED
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5 px-3 py-1 border border-red-500/30 text-red-400 bg-red-500/10 rounded-full text-xs font-bold tracking-wider">
-                    <TriangleAlert className="w-4 h-4" /> VULNERABLE
-                  </span>
-                )}
-              </div>
-              <p className="text-white/40 font-mono text-sm flex items-center gap-2">
-                <Globe className="w-4 h-4" /> https://{mainReport.hostname}
-              </p>
-            </div>
-            
-            <div className="flex gap-3">
-              <button 
-                onClick={downloadCBOM}
+          <div className="relative z-10 text-center lg:text-left">
+            <h1 className="text-2xl font-bold flex items-center justify-center lg:justify-start gap-2.5 tracking-tight">
+              <ShieldCheck className="text-[#F5A623] w-7 h-7" />
+              PNB Quantum Readiness Engine
+            </h1>
+            <p className="text-zinc-400 text-sm mt-1 max-w-lg">
+              Verify if a financial domain is protected against future quantum computing threats using NIST FIPS 203 standards.
+            </p>
+          </div>
+
+          <form onSubmit={handleStartRootScan} className="w-full lg:w-auto flex-1 max-w-2xl flex flex-col sm:flex-row gap-3 relative z-10">
+            <div className="relative flex-1 group">
+              <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-[#F5A623] transition-colors" />
+              <input 
+                type="text" 
+                placeholder="Enter domain (e.g., pnbindia.in)"
+                value={domainInput}
+                onChange={(e) => setDomainInput(e.target.value)}
+                title="Input the fully qualified domain name. The engine will perform a live TLS handshake to extract cryptographic telemetry."
+                className="w-full bg-zinc-950/50 border border-zinc-800 focus:border-[#F5A623]/50 text-zinc-100 rounded-xl pl-11 pr-4 py-3 focus:outline-none focus:ring-4 focus:ring-[#F5A623]/10 transition-all font-mono text-sm"
                 disabled={isScanning}
-                className="flex items-center gap-2 bg-[#1c212b] hover:bg-[#252b36] border border-white/10 px-4 py-2.5 rounded-lg text-sm font-semibold text-yellow-500 transition-all disabled:opacity-50"
-              >
-                <Download className="w-4 h-4" /> EXPORT CBOM
-              </button>
+              />
             </div>
-          </div>
+            <button 
+              type="submit"
+              disabled={isScanning || !domainInput}
+              title="Initiate a live mathematical exchange requesting ML-KEM keys."
+              className="bg-[#A31127] hover:bg-[#8b0e21] text-white px-8 py-3 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(163,17,39,0.3)]"
+            >
+              {scanPhase === 'root_scanning' ? <Loader2 className="w-4 h-4 animate-spin text-zinc-300" /> : <Search className="w-4 h-4" />}
+              {scanPhase === 'root_scanning' ? 'Analyzing...' : 'Audit Target'}
+            </button>
+          </form>
+        </header>
 
-          {/* Metric Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl">
-              <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
-                <Cpu className="w-3 h-3 text-blue-400" /> Detected Algorithm
-              </span>
-              <div className={`font-bold text-lg font-mono truncate ${mainReport.detected_algorithm === 'OFFLINE' ? 'text-red-500' : 'text-white'}`}>
-                {mainReport.detected_algorithm}
+        {/* ACTIVE DASHBOARD */}
+        {mainReport && (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            
+            {/* STATUS HEADER */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+              <div>
+                <div className="flex items-center gap-3 mb-1">
+                  <h2 className="text-2xl font-bold">{mainReport.hostname}</h2>
+                  {mainReport.is_pqc_enabled ? (
+                    <InfoTooltip content={<span className="text-emerald-400"><strong>PQC Verified:</strong> The server successfully accepted a Post-Quantum Kyber/ML-KEM key exchange, mathematically securing data against quantum decryption.</span>}>
+                      <span className="flex items-center gap-1.5 px-3 py-1 border border-emerald-500/20 bg-emerald-500/10 text-emerald-400 rounded-full text-xs font-bold uppercase tracking-wider cursor-help">
+                        <ShieldCheck className="w-3.5 h-3.5" /> PQC Verified
+                      </span>
+                    </InfoTooltip>
+                  ) : (
+                    <InfoTooltip content={<span className="text-red-400"><strong>At Risk:</strong> The server relies on classical RSA/ECC cryptography. It is vulnerable to interception and future quantum decryption.</span>}>
+                      <span className="flex items-center gap-1.5 px-3 py-1 border border-[#A31127]/30 bg-[#A31127]/10 text-red-400 rounded-full text-xs font-bold uppercase tracking-wider cursor-help">
+                        <TriangleAlert className="w-3.5 h-3.5" /> At Risk
+                      </span>
+                    </InfoTooltip>
+                  )}
+                </div>
+                <p className="text-zinc-500 text-sm">Primary Domain Cryptographic Analysis Complete</p>
+              </div>
+              <div className="flex gap-3 w-full sm:w-auto">
+                <button title="Download Cryptographic Bill of Materials (JSON format)" className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  <Download className="w-4 h-4 text-zinc-400" /> CBOM
+                </button>
+                <button title="Download human-readable executive PDF report" className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  <FileText className="w-4 h-4 text-zinc-400" /> Report
+                </button>
               </div>
             </div>
 
-            <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl">
-              <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
-                <Lock className="w-3 h-3 text-cyan-400" /> Protocol
-              </span>
-              <div className="font-bold text-2xl">{mainReport.tls_version}</div>
-            </div>
-
-            <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl">
-              <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
-                <TriangleAlert className="w-3 h-3 text-red-400" /> Q-Day Risk
-              </span>
-              <div className="font-bold text-3xl text-red-400">{mainReport.q_day_risk}%</div>
-            </div>
-
-            <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl">
-              <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
-                <ShieldCheck className="w-3 h-3 text-green-400" /> Security Score
-              </span>
-              <div className={`font-bold text-3xl ${mainReport.security_score > 70 ? 'text-[#4ade80]' : 'text-yellow-400'}`}>
-                {mainReport.security_score}/100
-              </div>
-            </div>
-          </div>
-
-          {/* Details Section: Handshake & Roadmaps */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-            <div className="lg:col-span-2 bg-[#161b22] border border-white/5 rounded-xl p-6">
-              <h3 className="text-white font-bold flex items-center gap-2 mb-6">
-                <Activity className="w-5 h-5 text-blue-400" /> Handshake Breakdown
-              </h3>
+            {/* BENTO GRID LAYOUT */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               
-              <div className="bg-[#0a0d14] border border-white/5 p-4 rounded-lg font-mono text-sm text-blue-300 mb-8 leading-relaxed">
-                {mainReport.handshake_text}
-              </div>
-
-              <div className="space-y-6 px-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-24 text-xs text-white/50 text-right">Threat Level</div>
-                  <div className="flex-1 h-8 bg-[#0a0d14] rounded overflow-hidden relative">
-                    <div className="absolute inset-0 flex justify-between px-1/4">
-                      <div className="w-px h-full bg-white/5 border-l border-dashed border-white/10"></div>
-                      <div className="w-px h-full bg-white/5 border-l border-dashed border-white/10"></div>
-                      <div className="w-px h-full bg-white/5 border-l border-dashed border-white/10"></div>
-                    </div>
-                    <div 
-                      className="h-full bg-red-500 rounded relative z-10 transition-all duration-1000 ease-out"
-                      style={{ width: `${mainReport.threat_level}%` }}
-                    />
+              {/* LEFT COLUMN: Summary & Roadmap */}
+              <div className="lg:col-span-4 flex flex-col gap-6">
+                
+                {/* Exec Summary */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex-1">
+                  <InfoTooltip content="An AI-generated synthesis combining the FIPS 203 scoring model with the raw OpenSSL telemetry from the live handshake." className="mb-4 block">
+                    <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                      <Info className="w-4 h-4" /> Executive Summary
+                    </h3>
+                  </InfoTooltip>
+                  <div className={`p-4 rounded-xl border ${mainReport.is_pqc_enabled ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-100' : 'bg-[#A31127]/10 border-[#A31127]/20 text-red-100'}`}>
+                    <p className="text-sm leading-relaxed">
+                      {mainReport.layman_summary || (mainReport.is_pqc_enabled 
+                        ? "This domain successfully negotiated a Post-Quantum connection. It is currently protected against Future Quantum Decryption attacks and aligns with upcoming compliance mandates."
+                        : "This domain relies on classical cryptography (RSA/ECC). While secure against today's computers, it is vulnerable to 'Harvest Now, Decrypt Later' operations and fails modern PQC readiness checks.")}
+                    </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4">
-                  <div className="w-24 text-xs text-white/50 text-right">Readiness</div>
-                  <div className="flex-1 h-8 bg-[#0a0d14] rounded overflow-hidden relative">
-                    <div className="absolute inset-0 flex justify-between px-1/4">
-                      <div className="w-px h-full bg-white/5 border-l border-dashed border-white/10"></div>
-                      <div className="w-px h-full bg-white/5 border-l border-dashed border-white/10"></div>
-                      <div className="w-px h-full bg-white/5 border-l border-dashed border-white/10"></div>
-                    </div>
-                    <div 
-                      className="h-full bg-[#4ade80] rounded relative z-10 transition-all duration-1000 ease-out"
-                      style={{ width: `${mainReport.readiness}%` }}
-                    />
+                {/* Roadmap */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex-1">
+                  <InfoTooltip content="Actionable steps mapped directly to NIST Special Publication 800-208 and FIPS 204/205 digital signature requirements." className="mb-4 block">
+                    <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                      <Target className="w-4 h-4 text-cyan-500" /> Actionable Roadmap
+                    </h3>
+                  </InfoTooltip>
+                  <ul className="space-y-3">
+                    {mainReport.hardening_roadmap.map((item, idx) => (
+                      <li key={idx} className="flex items-start gap-3 text-sm text-zinc-300 bg-zinc-950/50 p-3 rounded-lg border border-zinc-800/50 hover:bg-zinc-900 transition-colors cursor-default" title={item}>
+                        <ChevronRight className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                    {mainReport.hardening_roadmap.length === 0 && <li className="text-zinc-500 text-sm italic p-2">No immediate actions required.</li>}
+                  </ul>
+
+                  <InfoTooltip content="Older protocols (like TLS 1.2 or SHA-1) that create bottlenecks. These must be upgraded before hybrid PQC can be enabled." className="mt-6 mb-4 block">
+                    <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-[#F5A623]" /> Legacy Constraints
+                    </h3>
+                  </InfoTooltip>
+                  <div className="flex flex-wrap gap-2">
+                    {mainReport.legacy_weaknesses.map((item, idx) => (
+                      <span key={idx} title={`Constraint: ${item}`} className="bg-zinc-800 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg text-xs font-medium cursor-help">
+                        {item}
+                      </span>
+                    ))}
+                    {mainReport.legacy_weaknesses.length === 0 && <span className="text-zinc-500 text-sm italic p-2">No constraints detected.</span>}
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div className="space-y-6">
-              <div className="bg-[#161b22] border border-white/5 rounded-xl p-6 h-full">
-                <h3 className="text-cyan-400 font-bold mb-4 text-sm">Hardening Roadmap</h3>
-                <ul className="space-y-4 mb-6">
-                  {mainReport.hardening_roadmap.map((item, idx) => (
-                    <li key={idx} className="flex items-start gap-3 text-sm text-white/80">
-                      <ShieldCheck className="w-4 h-4 text-cyan-400 mt-0.5 shrink-0" />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                  {mainReport.hardening_roadmap.length === 0 && (
-                    <li className="text-white/40 text-xs italic">No actions required.</li>
-                  )}
-                </ul>
+              {/* RIGHT COLUMN: Metrics & Telemetry */}
+              <div className="lg:col-span-8 flex flex-col gap-6">
+                
+                {/* 4 Metric Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <InfoTooltip content={<div><strong className="text-white block mb-1">Mathematical Formula:</strong> ML-KEM is the new Post-Quantum standard. X25519 or RSA are classical and easily broken by Shor's algorithm.</div>} className="w-full">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 relative overflow-hidden w-full text-left">
+                      <div className="absolute top-0 right-0 w-16 h-16 bg-[#F5A623]/10 rounded-bl-full -mr-4 -mt-4" />
+                      <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 flex justify-between items-center">
+                        Key Exchange <Cpu className="w-3.5 h-3.5 text-[#F5A623]" />
+                      </p>
+                      <p className={`text-xl font-bold font-mono truncate ${mainReport.detected_algorithm === 'OFFLINE' ? 'text-[#A31127]' : 'text-zinc-100'}`}>
+                        {mainReport.detected_algorithm}
+                      </p>
+                      <p className="text-[10px] text-zinc-500 mt-2">NIST standard ML-KEM preferred</p>
+                    </div>
+                  </InfoTooltip>
 
-                <h3 className="text-orange-400 font-bold mb-4 text-sm">Legacy Weaknesses</h3>
-                <div className="flex flex-wrap gap-2">
-                  {mainReport.legacy_weaknesses.map((item, idx) => (
-                    <span key={idx} className="bg-red-500/10 border border-red-500/20 text-red-200 px-3 py-1.5 rounded-md text-xs font-mono">
-                      {item}
-                    </span>
-                  ))}
-                  {mainReport.legacy_weaknesses.length === 0 && (
-                    <span className="text-white/40 text-xs italic">No critical legacy weaknesses detected.</span>
-                  )}
+                  <InfoTooltip content={<div><strong className="text-white block mb-1">Transport Layer:</strong> TLS 1.3 is mandated. Anything lower (TLS 1.2) significantly slows down the large key sizes required for quantum handshakes.</div>} className="w-full">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 relative overflow-hidden w-full text-left">
+                      <div className="absolute top-0 right-0 w-16 h-16 bg-cyan-500/10 rounded-bl-full -mr-4 -mt-4" />
+                      <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 flex justify-between items-center">
+                        Protocol <Lock className="w-3.5 h-3.5 text-cyan-500" />
+                      </p>
+                      <p className="text-2xl font-bold text-zinc-100">{mainReport.tls_version}</p>
+                      <p className="text-[10px] text-zinc-500 mt-2">Transport layer security version</p>
+                    </div>
+                  </InfoTooltip>
+
+                  <InfoTooltip content={<div><strong className="text-red-400 block mb-1">Data Exposure Risk:</strong> Measures probability of current data harvesting. 10-15% means PQC protected. 60%+ means hackers can store and later decrypt this data.</div>} className="w-full">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 relative overflow-hidden w-full text-left">
+                      <div className="absolute top-0 right-0 w-16 h-16 bg-[#A31127]/10 rounded-bl-full -mr-4 -mt-4" />
+                      <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 flex justify-between items-center">
+                        Data Risk <TriangleAlert className="w-3.5 h-3.5 text-red-400" />
+                      </p>
+                      <p className="text-3xl font-bold text-red-400">{mainReport.q_day_risk}%</p>
+                      <p className="text-[10px] text-zinc-500 mt-1">Harvest Now Decrypt Later risk</p>
+                    </div>
+                  </InfoTooltip>
+
+                  <InfoTooltip content={<div><strong className="text-emerald-400 block mb-1">Score Calculation:</strong> Starts at 100. Deductions for classical key exchange (-30), legacy RSA certificates (-5), or outdated TLS 1.2 (-10). 95+ is compliant.</div>} className="w-full">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 relative overflow-hidden w-full text-left">
+                      <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/10 rounded-bl-full -mr-4 -mt-4" />
+                      <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 flex justify-between items-center">
+                        NIST Score <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      </p>
+                      <p className={`text-3xl font-bold ${mainReport.security_score > 70 ? 'text-emerald-400' : 'text-[#F5A623]'}`}>
+                        {mainReport.security_score}/100
+                      </p>
+                      <p className="text-[10px] text-zinc-500 mt-1">FIPS 203 Compliance rating</p>
+                    </div>
+                  </InfoTooltip>
                 </div>
-              </div>
-            </div>
-          </div>
 
-          {/* 🟢 OSINT Trigger CTA Card 🟢 */}
-          {scanPhase === 'root_completed' && (
-            <div className="bg-gradient-to-r from-[#1c212b] to-[#161b22] border border-purple-500/20 rounded-xl p-6 mb-8 flex flex-col md:flex-row items-center justify-between gap-6 animate-in zoom-in-95 duration-300">
-              <div className="flex items-start gap-4">
-                <div className="p-3 bg-purple-500/10 rounded-lg shrink-0">
-                  <Radar className="w-6 h-6 text-purple-400" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white mb-1">Discover Deep Infrastructure</h3>
-                  <p className="text-white/60 text-sm">
-                    Root domain analysis complete. Deploy OSINT engines to discover and scan all associated subdomains for Post-Quantum readiness.
-                  </p>
-                </div>
-              </div>
-              <button 
-                onClick={handleLaunchSubdomainScan}
-                disabled={!activeDomainId}
-                className="shrink-0 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-900/40 disabled:cursor-not-allowed text-white px-6 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(168,85,247,0.4)]"
-              >
-                <Target className="w-4 h-4" /> Launch Subdomain Scan
-              </button>
-            </div>
-          )}
-
-          {/* 🟢 Subdomain Report Table (Shows ONLY during/after sub scan) 🟢 */}
-          {(scanPhase === 'sub_scanning' || scanPhase === 'sub_completed') && (
-            <div className="bg-[#161b22] border border-white/5 rounded-xl overflow-hidden animate-in slide-in-from-bottom-4 duration-500">
-              
-              <div className="p-5 border-b border-white/5 bg-[#1c212b]">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-white font-bold flex items-center gap-2">
-                    <Radar className="w-5 h-5 text-purple-400" /> Subdomain Scan Results
-                  </h3>
+                {/* Telemetry Panel */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex-1">
+                  <InfoTooltip content="Raw socket data extracted directly from the BoringSSL/OpenSSL negotiation phase during testing." className="mb-5 block">
+                    <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-purple-400" /> Live Telemetry
+                    </h3>
+                  </InfoTooltip>
                   
-                  <div className="text-xs font-mono">
+                  <div className="bg-zinc-950 rounded-xl p-4 font-mono text-xs text-zinc-400 mb-6 border border-zinc-800/50 shadow-inner overflow-x-auto" title="Raw Handshake Output">
+                    <span className="text-emerald-500 mr-2">$</span>
+                    {mainReport.handshake_text}
+                  </div>
+
+                  <div className="space-y-5">
+                    <div>
+                      <div className="flex justify-between text-xs font-medium text-zinc-400 mb-2">
+                        <InfoTooltip content="Percentage of infrastructure components heavily reliant on legacy elliptic curve cryptography (ECC).">
+                          <span className="border-b border-dashed border-zinc-600 pb-0.5">Vulnerability Footprint</span>
+                        </InfoTooltip>
+                        <span>{mainReport.threat_level}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden" title={`${mainReport.threat_level}% Vulnerability`}>
+                        <div 
+                          className="h-full bg-gradient-to-r from-[#F5A623] to-[#A31127] transition-all duration-1000 ease-out"
+                          style={{ width: `${mainReport.threat_level}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-xs font-medium text-zinc-400 mb-2">
+                        <InfoTooltip content="Percentage of load balancers and front-end gateways successfully upgraded to support hybrid Key Encapsulation Mechanisms (KEMs).">
+                          <span className="border-b border-dashed border-zinc-600 pb-0.5">PQC Architecture Readiness</span>
+                        </InfoTooltip>
+                        <span>{mainReport.readiness}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden" title={`${mainReport.readiness}% Ready`}>
+                        <div 
+                          className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-1000 ease-out"
+                          style={{ width: `${mainReport.readiness}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* PHASE 2 OSINT BANNER */}
+            {scanPhase === 'root_completed' && (
+              <div className="bg-gradient-to-r from-zinc-900 to-zinc-800 border border-[#F5A623]/20 rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+                <div className="absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-[#F5A623]/5 to-transparent pointer-events-none" />
+                <div className="flex items-start gap-5 relative z-10">
+                  <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 shadow-inner">
+                    <Radar className="w-8 h-8 text-[#F5A623]" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-zinc-100 mb-2">Phase 2: Deep Infrastructure Audit</h3>
+                    <p className="text-zinc-400 text-sm leading-relaxed max-w-3xl">
+                      Enterprise risk extends beyond the root domain. Authorize the OSINT engine to automatically discover, map, and cryptographically verify all associated subdomains, API gateways, and mail servers against PQC standards.
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={handleLaunchSubdomainScan}
+                  disabled={!activeDomainId}
+                  title="Query Certificate Transparency (CT) logs to find shadow IT."
+                  className="shrink-0 bg-white hover:bg-zinc-200 text-zinc-950 disabled:opacity-50 px-8 py-3.5 rounded-xl font-bold text-sm transition-all flex items-center gap-2 shadow-lg relative z-10"
+                >
+                  <Server className="w-4 h-4" /> Authorize Scan
+                </button>
+              </div>
+            )}
+
+            {/* PHASE 3 ASSET TABLE */}
+            {(scanPhase === 'sub_scanning' || scanPhase === 'sub_completed') && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col">
+                
+                <div className="p-6 border-b border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-zinc-950/30">
+                  <InfoTooltip content="A comprehensive ledger of all discovered subdomains and their individual cryptographic configurations.">
+                    <h3 className="text-zinc-100 font-bold flex items-center gap-2">
+                      <Radar className="w-5 h-5 text-[#F5A623]" /> Asset Discovery Matrix
+                    </h3>
+                  </InfoTooltip>
+                  
+                  <div className="text-xs font-mono font-medium bg-zinc-900 px-4 py-2 rounded-lg border border-zinc-800">
                     {scanPhase === 'sub_scanning' ? (
                       progress.total === 0 ? (
-                         <span className="flex items-center gap-2 text-yellow-500">
-                           <Loader2 className="w-3 h-3 animate-spin" /> Gathering OSINT Data...
+                         <span className="flex items-center gap-2 text-zinc-400">
+                           <Loader2 className="w-3.5 h-3.5 animate-spin text-[#F5A623]" /> Querying CT Logs...
                          </span>
                       ) : (
-                         <span className="flex items-center gap-2 text-blue-400">
-                           <Loader2 className="w-3 h-3 animate-spin" /> Scanning {progress.scanned} / {progress.total} Assets ({progressPercent}%)
+                         <span className="flex items-center gap-2 text-[#F5A623]">
+                           <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying {progress.scanned}/{progress.total} Assets ({progressPercent}%)
                          </span>
                       )
                     ) : (
-                      <span className="text-[#4ade80] flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Complete ({subdomains.length} verified assets)
+                      <span className="text-emerald-400 flex items-center gap-1.5" title="All discovered assets have been successfully polled via HTTPS requests.">
+                        <CheckCircle2 className="w-4 h-4" /> Audit Complete: {subdomains.length} mapped
                       </span>
                     )}
                   </div>
                 </div>
 
                 {scanPhase === 'sub_scanning' && progress.total > 0 && (
-                  <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
+                  <div className="w-full bg-zinc-950 h-1">
                     <div 
-                      className="bg-blue-500 h-full transition-all duration-500 ease-out" 
+                      className="bg-[#F5A623] h-full transition-all duration-500 ease-out" 
                       style={{ width: `${progressPercent}%` }} 
                     />
                   </div>
                 )}
-              </div>
-              
-              <div className="overflow-x-auto min-h-[150px]">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-[#0a0d14] text-white/40 text-xs uppercase font-mono">
-                    <tr>
-                      <th className="px-6 py-4">Hostname</th>
-                      <th className="px-6 py-4">Key Exchange</th>
-                      <th className="px-6 py-4">Protocol</th>
-                      <th className="px-6 py-4">PQC Status</th>
-                      <th className="px-6 py-4">Details</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5 relative">
-                    {subdomains.length === 0 && scanPhase === 'sub_scanning' && (
-                       <tr>
-                         <td colSpan={5} className="p-8 text-center text-white/40 text-sm font-mono">
-                           Waiting for first response...
-                         </td>
-                       </tr>
-                    )}
-                    {subdomains.map((sub, idx) => (
-                      <tr key={idx} className="hover:bg-white/5 transition-colors animate-in fade-in duration-500">
-                        <td className="px-6 py-4 font-bold text-white/90">{sub.hostname}</td>
-                        <td className="px-6 py-4 font-mono text-[11px] text-white/60">{sub.detected_algorithm}</td>
-                        <td className="px-6 py-4 font-mono text-xs">{sub.tls_version}</td>
-                        <td className="px-6 py-4">
-                          {sub.is_pqc_enabled ? (
-                            <span className="text-[#4ade80] bg-[#4ade80]/10 border border-[#4ade80]/20 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide">PQC Safe</span>
-                          ) : (
-                            <span className="text-[#f87171] bg-[#f87171]/10 border border-[#f87171]/20 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide">Not Safe</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4">
-                          <button
-                            onClick={() => setSelectedSubdomain(sub)}
-                            className="text-xs px-2 py-1 rounded border border-white/20 hover:border-white/40 text-white/80 hover:text-white"
-                          >
-                            View
-                          </button>
-                        </td>
+                
+                <div className="overflow-x-auto max-h-[500px] custom-scrollbar">
+                  <table className="w-full text-left text-sm whitespace-nowrap">
+                    <thead className="bg-zinc-950/80 backdrop-blur text-zinc-400 text-[11px] uppercase tracking-wider font-semibold sticky top-0 z-10">
+                      <tr>
+                        <th className="px-6 py-4">
+                          <InfoTooltip content="The resolved CNAME or A-Record discovered via OSINT.">Endpoint</InfoTooltip>
+                        </th>
+                        <th className="px-6 py-4">
+                          <InfoTooltip content="The mathematical curve or lattice used to agree on session keys.">Algorithm</InfoTooltip>
+                        </th>
+                        <th className="px-6 py-4">
+                          <InfoTooltip content="The secure communication protocol version running on the port.">Transport</InfoTooltip>
+                        </th>
+                        <th className="px-6 py-4 text-right">
+                          <InfoTooltip content="Determines if this specific node meets FIPS 203 guidelines.">Status</InfoTooltip>
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          <Dialog open={!!selectedSubdomain} onOpenChange={(open) => !open && setSelectedSubdomain(null)}>
-            <DialogContent className="bg-[#0f1219] border border-white/10 text-white max-w-xl">
-              <DialogHeader>
-                <DialogTitle>Subdomain Scan Details</DialogTitle>
-                <DialogDescription className="text-white/60">
-                  Deep scan metadata for the selected subdomain under the currently scanned root domain.
-                </DialogDescription>
-              </DialogHeader>
-
-              {selectedSubdomain && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2 text-sm">
-                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3 sm:col-span-2">
-                    <p className="text-[11px] uppercase tracking-wide text-white/50">Hostname</p>
-                    <p className="mt-1 font-mono text-white/90 break-all">{selectedSubdomain.hostname}</p>
-                  </div>
-                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-white/50">TLS Version</p>
-                    <p className="mt-1 text-white/90">{selectedSubdomain.tls_version}</p>
-                  </div>
-                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3">
-                    <p className="text-[11px] uppercase tracking-wide text-white/50">Issuer</p>
-                    <p className="mt-1 text-white/90">{selectedSubdomain.issuer}</p>
-                  </div>
-                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3 sm:col-span-2">
-                    <p className="text-[11px] uppercase tracking-wide text-white/50">Key Exchange / Algorithm</p>
-                    <p className="mt-1 font-mono text-white/90">{selectedSubdomain.detected_algorithm}</p>
-                  </div>
-                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3 sm:col-span-2">
-                    <p className="text-[11px] uppercase tracking-wide text-white/50">PQC Classification</p>
-                    <p className={selectedSubdomain.is_pqc_enabled ? 'mt-1 text-green-400 font-semibold' : 'mt-1 text-red-400 font-semibold'}>
-                      {selectedSubdomain.is_pqc_enabled ? 'PQC Safe' : 'Not Safe'}
-                    </p>
-                  </div>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/50">
+                      {subdomains.length === 0 && scanPhase === 'sub_scanning' && (
+                         <tr>
+                           <td colSpan={4} className="p-16 text-center text-zinc-500 text-sm font-mono flex flex-col items-center justify-center gap-3 w-full">
+                             <Loader2 className="w-6 h-6 animate-spin text-zinc-600" />
+                             Awaiting telemetry...
+                           </td>
+                         </tr>
+                      )}
+                      {subdomains.map((sub, idx) => (
+                        <tr 
+                          key={idx} 
+                          onClick={() => setSelectedSubdomain(sub)}
+                          className="hover:bg-zinc-800/50 transition-colors cursor-pointer group"
+                        >
+                          <td 
+                            className="px-6 py-4 font-medium text-zinc-200 group-hover:text-white transition-colors"
+                            title={`Discovered Host: ${sub.hostname}\nClick for full details.`}
+                          >
+                            {sub.hostname}
+                          </td>
+                          <td 
+                            className="px-6 py-4 font-mono text-xs text-zinc-400"
+                            title={`Key Exchange Algorithm: ${sub.detected_algorithm}.\n${sub.detected_algorithm.includes('ML-KEM') ? 'Secure against quantum computing.' : 'Vulnerable to Shor\'s algorithm.'}`}
+                          >
+                            {sub.detected_algorithm}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span 
+                              className="bg-zinc-800 px-2.5 py-1 rounded text-xs text-zinc-300 font-mono"
+                              title={`Protocol Version: ${sub.tls_version}.\n${sub.tls_version === 'TLSv1.3' ? 'Optimal for PQC.' : 'Warning: Legacy protocol detected.'}`}
+                            >
+                              {sub.tls_version}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            {sub.is_pqc_enabled ? (
+                              <span 
+                                title="FIPS 203 Compliant: Data exchanged here is protected against future quantum decryption." 
+                                className="text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest"
+                              >
+                                PQC Safe
+                              </span>
+                            ) : (
+                              <span 
+                                title="Vulnerable: Data exchanged here is at risk of 'Harvest Now, Decrypt Later' attacks." 
+                                className="text-red-400 bg-[#A31127]/10 border border-[#A31127]/30 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest"
+                              >
+                                At Risk
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-            </DialogContent>
-          </Dialog>
+              </div>
+            )}
 
-        </div>
-      )}
+            {/* MODAL / DIALOG */}
+            <Dialog open={!!selectedSubdomain} onOpenChange={(open) => !open && setSelectedSubdomain(null)}>
+              <DialogContent className="bg-zinc-900 border border-zinc-800 text-zinc-100 max-w-lg p-6 sm:p-8 rounded-2xl shadow-2xl">
+                <DialogHeader className="mb-6">
+                  <DialogTitle className="text-xl">Asset Details</DialogTitle>
+                  <DialogDescription className="text-zinc-400">
+                    Deep scan metadata for selected node.
+                  </DialogDescription>
+                </DialogHeader>
+
+                {selectedSubdomain && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                    <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 sm:col-span-2">
+                      <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-1">Hostname</p>
+                      <p className="font-mono text-zinc-200 break-all">{selectedSubdomain.hostname}</p>
+                    </div>
+                    <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4" title="Transport Layer Security (TLS) Version. TLS 1.3 is required for modern PQC integration.">
+                      <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-1 cursor-help border-b border-dashed border-zinc-600 inline-block">Transport</p>
+                      <p className="text-zinc-200 font-mono text-xs mt-1">{selectedSubdomain.tls_version}</p>
+                    </div>
+                    <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4" title="The Certificate Authority (CA) that signed the X.509 certificate for this node.">
+                      <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-1 cursor-help border-b border-dashed border-zinc-600 inline-block">Authority</p>
+                      <p className="text-zinc-200 truncate mt-1">{selectedSubdomain.issuer}</p>
+                    </div>
+                    <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 sm:col-span-2 flex justify-between items-center">
+                      <div title="The specific mathematical operation generating the session key.">
+                        <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-1 cursor-help border-b border-dashed border-zinc-600 inline-block">Key Exchange</p>
+                        <p className="font-mono text-zinc-200 mt-1">{selectedSubdomain.detected_algorithm}</p>
+                      </div>
+                      <div className="text-right" title="Determines if this node meets FIPS 203 digital signature and key encapsulation mandates.">
+                        <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-1 cursor-help border-b border-dashed border-zinc-600 inline-block">Status</p>
+                        <p className={`mt-1 ${selectedSubdomain.is_pqc_enabled ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}`}>
+                          {selectedSubdomain.is_pqc_enabled ? 'Verified Safe' : 'Vulnerable'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
+
+          </div>
+        )}
+      </div>
     </div>
   )
 }

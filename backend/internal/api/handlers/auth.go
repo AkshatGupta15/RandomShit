@@ -1,7 +1,12 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
@@ -13,10 +18,73 @@ import (
 
 // In a real app, load this from .env. For the hackathon, this is fine.
 var jwtSecret = []byte("pnb-hackathon-super-secret-key-2026")
+var twoFAChallenges sync.Map
+
+type twoFAChallenge struct {
+	UserID    uint
+	Username  string
+	Role      string
+	OTP       string
+	ExpiresAt time.Time
+}
 
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type Verify2FARequest struct {
+	ChallengeID string `json:"challenge_id"`
+	OTP         string `json:"otp"`
+}
+
+func generateChallengeID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func generateOTP() (string, error) {
+	b := make([]byte, 3)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	n := int(b[0])<<16 | int(b[1])<<8 | int(b[2])
+	return fmt.Sprintf("%06d", n%1000000), nil
+}
+
+func issueJWTAndSetCookie(c *fiber.Ctx, userID uint, username, role string) error {
+	claims := jwt.MapClaims{
+		"user_id":  userID,
+		"username": username,
+		"role":     role,
+		"exp":      time.Now().Add(time.Hour * 24).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	t, err := token.SignedString(jwtSecret)
+	if err != nil {
+		return err
+	}
+
+	env := os.Getenv("ENV")
+	secure := false
+	sameSite := "Lax"
+	if env == "production" {
+		secure = true
+		sameSite = "None"
+	}
+
+	c.Cookie(&fiber.Cookie{
+		Name:     "jwt_auth",
+		Value:    t,
+		HTTPOnly: true,
+		Secure:   secure,
+		SameSite: sameSite,
+	})
+
+	return nil
 }
 
 // LoginUser - POST /api/v1/auth/login
@@ -37,43 +105,80 @@ func LoginUser(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "Invalid credentials"})
 	}
 
-	// 3. Create the JWT Token
-	claims := jwt.MapClaims{
-		"user_id":  user.ID,
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour * 24).Unix(), // Expires in 24 hours
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	t, err := token.SignedString(jwtSecret)
+	// 3. Create a 2FA challenge instead of issuing JWT immediately
+	challengeID, err := generateChallengeID()
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to generate 2FA challenge"})
+	}
+	otp, err := generateOTP()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to generate OTP"})
 	}
 
-	// 4. Set the Secure HttpOnly Cookie
-	env := os.Getenv("ENV")
-
-	secure := false
-	sameSite := "Lax"
-
-	if env == "production" {
-		secure = true
-		sameSite = "None"
-	}
-
-	c.Cookie(&fiber.Cookie{
-		Name:     "jwt_auth",
-		Value:    t,
-		HTTPOnly: true,
-		Secure:   secure,
-		SameSite: sameSite,
+	expiresAt := time.Now().Add(5 * time.Minute)
+	twoFAChallenges.Store(challengeID, twoFAChallenge{
+		UserID:    user.ID,
+		Username:  user.Username,
+		Role:      user.Role,
+		OTP:       otp,
+		ExpiresAt: expiresAt,
 	})
+
+	response := fiber.Map{
+		"message":            "2FA verification required",
+		"requires_2fa":       true,
+		"challenge_id":       challengeID,
+		"expires_in_seconds": 300,
+	}
+
+	env := os.Getenv("ENV")
+	if env != "production" {
+		response["otp_hint"] = otp
+	}
+
+	return c.JSON(response)
+}
+
+// VerifyTwoFactor - POST /api/v1/auth/verify-2fa
+func VerifyTwoFactor(c *fiber.Ctx) error {
+	var req Verify2FARequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request payload"})
+	}
+
+	req.ChallengeID = strings.TrimSpace(req.ChallengeID)
+	req.OTP = strings.TrimSpace(req.OTP)
+	if req.ChallengeID == "" || req.OTP == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "challenge_id and otp are required"})
+	}
+
+	rawChallenge, exists := twoFAChallenges.Load(req.ChallengeID)
+	if !exists {
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid or expired 2FA challenge"})
+	}
+
+	challenge := rawChallenge.(twoFAChallenge)
+	if time.Now().After(challenge.ExpiresAt) {
+		twoFAChallenges.Delete(req.ChallengeID)
+		return c.Status(401).JSON(fiber.Map{"error": "2FA code expired"})
+	}
+
+	if challenge.OTP != req.OTP {
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid OTP"})
+	}
+
+	twoFAChallenges.Delete(req.ChallengeID)
+
+	if err := issueJWTAndSetCookie(c, challenge.UserID, challenge.Username, challenge.Role); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to generate session"})
+	}
+
 	return c.JSON(fiber.Map{
 		"message": "Login successful",
 		"user": fiber.Map{
-			"id":       user.ID,
-			"username": user.Username,
-			"role":     user.Role,
+			"id":       challenge.UserID,
+			"username": challenge.Username,
+			"role":     challenge.Role,
 		},
 	})
 }

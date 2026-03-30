@@ -15,7 +15,8 @@ interface AuthContextType {
   isLoading: boolean
   isAuthenticated: boolean
   isDemoMode: boolean
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<{ requires_2fa?: boolean; challenge_id?: string; otp_hint?: string }>
+  verifyTwoFactor: (challengeId: string, otp: string) => Promise<void>
   logout: () => Promise<void>
   checkSession: () => Promise<void>
 }
@@ -51,13 +52,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (username: string, password: string) => {
     const data = await api.login(username, password)
-    
-    // In demo mode, store in localStorage
-    if (isDemoMode && typeof window !== 'undefined') {
-      localStorage.setItem('pnb_demo_user', JSON.stringify(data.user))
+
+    if (data?.requires_2fa) {
+      return {
+        requires_2fa: true,
+        challenge_id: data.challenge_id,
+        otp_hint: data.otp_hint,
+      }
     }
     
-    setUser(data.user)
+    // In demo mode, store in localStorage
+    if (isDemoMode && typeof window !== 'undefined' && data?.user) {
+      localStorage.setItem('pnb_demo_user', JSON.stringify(data.user))
+    }
+
+    if (data?.user) {
+      setUser(data.user)
+    }
+
+    return {}
+  }
+
+  const verifyTwoFactor = async (challengeId: string, otp: string) => {
+    const data = await api.verify2FA(challengeId, otp)
+
+    if (isDemoMode && typeof window !== 'undefined' && data?.user) {
+      localStorage.setItem('pnb_demo_user', JSON.stringify(data.user))
+    }
+
+    if (data?.user) {
+      setUser(data.user)
+    }
   }
 
   const logout = async () => {
@@ -83,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isDemoMode,
         login,
+        verifyTwoFactor,
         logout,
         checkSession,
       }}

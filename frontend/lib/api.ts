@@ -200,7 +200,12 @@ getDomainSubdomains: async (id: number) => {
     if (IS_DEMO_MODE) {
       await simulateDelay(500, 1000)
       if (username === 'admin' && password === 'admin123') {
-        return { user: mockData.mockUser, token: 'demo-jwt-token' }
+        return {
+          requires_2fa: true,
+          challenge_id: 'demo-challenge',
+          expires_in_seconds: 300,
+          otp_hint: '123456',
+        }
       }
       throw new ApiError(401, 'Invalid credentials. Use admin/admin123 for demo.')
     }
@@ -219,6 +224,23 @@ getDomainSubdomains: async (id: number) => {
   }
 
   return data
+  },
+
+  async verify2FA(challengeId: string, otp: string) {
+    if (IS_DEMO_MODE) {
+      await simulateDelay(300, 700)
+      if (challengeId === 'demo-challenge' && otp === '123456') {
+        return { user: mockData.mockUser, token: 'demo-jwt-token' }
+      }
+      throw new ApiError(401, 'Invalid OTP. Use 123456 for demo.')
+    }
+
+    const res = await fetchWithTimeout(`${API_BASE_URL}/auth/verify-2fa`, {
+      method: 'POST',
+      body: JSON.stringify({ challenge_id: challengeId, otp }),
+    })
+    if (!res.ok) await throwApiError(res, '2FA verification failed')
+    return res.json()
   },
 
   async logout() {

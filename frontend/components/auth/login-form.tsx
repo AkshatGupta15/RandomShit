@@ -12,27 +12,63 @@ import { useAuth } from '@/contexts/auth-context'
 import { api } from '@/lib/api'
 
 export function LoginForm() {
-  const { login } = useAuth()
+  const { login, verifyTwoFactor } = useAuth()
   const isDemoMode = api.isDemoMode()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [otp, setOtp] = useState('')
+  const [challengeId, setChallengeId] = useState<string | null>(null)
+  const [otpHint, setOtpHint] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [loginStep, setLoginStep] = useState<'credentials' | 'otp'>('credentials')
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setIsLoading(true)
 
     try {
-      await login(username, password)
+      const result = await login(username, password)
+      if (result.requires_2fa && result.challenge_id) {
+        setChallengeId(result.challenge_id)
+        setOtpHint(result.otp_hint ?? null)
+        setLoginStep('otp')
+        return
+      }
     } catch (err) {
       setError('Invalid credentials. Please try again.')
       console.error('Login error:', err)
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const handleOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setIsLoading(true)
+
+    try {
+      if (!challengeId) {
+        throw new Error('Missing challenge')
+      }
+      await verifyTwoFactor(challengeId, otp)
+    } catch (err) {
+      setError('Invalid or expired OTP. Please try again.')
+      console.error('2FA verification error:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const goBackToCredentials = () => {
+    setLoginStep('credentials')
+    setChallengeId(null)
+    setOtp('')
+    setOtpHint(null)
+    setError(null)
   }
 
   return (
@@ -146,58 +182,102 @@ export function LoginForm() {
           )}
 
           {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Username */}
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.4 }}
-            >
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="text"
-                  placeholder="Username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="pl-10 h-12 bg-secondary/50 border-border/50 focus:border-pnb-gold focus:ring-pnb-gold/20"
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-            </motion.div>
+          <form onSubmit={loginStep === 'credentials' ? handleCredentialsSubmit : handleOtpSubmit} className="space-y-5">
+            {loginStep === 'credentials' ? (
+              <>
+                {/* Username */}
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.4 }}
+                >
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="pl-10 h-12 bg-secondary/50 border-border/50 focus:border-pnb-gold focus:ring-pnb-gold/20"
+                      required
+                      disabled={isLoading}
+                    />
+                  </div>
+                </motion.div>
 
-            {/* Password */}
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.5 }}
-            >
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10 pr-10 h-12 bg-secondary/50 border-border/50 focus:border-pnb-gold focus:ring-pnb-gold/20"
-                  required
-                  disabled={isLoading}
-                />
+                {/* Password */}
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.5 }}
+                >
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pl-10 pr-10 h-12 bg-secondary/50 border-border/50 focus:border-pnb-gold focus:ring-pnb-gold/20"
+                      required
+                      disabled={isLoading}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      disabled={isLoading}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              </>
+            ) : (
+              <>
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.4 }}
+                >
+                  <div className="relative">
+                    <Shield className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Enter 6-digit OTP"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className="pl-10 h-12 bg-secondary/50 border-border/50 focus:border-pnb-gold focus:ring-pnb-gold/20 tracking-[0.3em] font-mono"
+                      required
+                      disabled={isLoading}
+                    />
+                  </div>
+                </motion.div>
+
+                {otpHint && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="rounded-lg border border-pnb-gold/30 bg-pnb-gold/10 px-3 py-2"
+                  >
+                    <p className="text-xs text-pnb-gold">Dev OTP: <span className="font-mono tracking-wider">{otpHint}</span></p>
+                  </motion.div>
+                )}
+
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={goBackToCredentials}
+                  className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
                   disabled={isLoading}
                 >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
+                  Back to username/password
                 </button>
-              </div>
-            </motion.div>
+              </>
+            )}
 
             {/* Submit button */}
             <motion.div
@@ -224,7 +304,7 @@ export function LoginForm() {
                 ) : (
                   <span className="flex items-center gap-2">
                     <Shield className="h-5 w-5" />
-                    Access System
+                    {loginStep === 'credentials' ? 'Access System' : 'Verify OTP'}
                   </span>
                 )}
               </Button>
