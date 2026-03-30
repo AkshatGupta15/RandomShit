@@ -37,30 +37,24 @@ func StartRootScan(c *fiber.Ctx) error {
 	cleanDomain := strings.TrimPrefix(req.Domain, "https://")
 	cleanDomain = strings.TrimPrefix(cleanDomain, "http://")
 
-	// 1. Fetch or Create Domain in DB
+	// 1. Safe DB Fetch or Create (Fixes Unique Constraint Crash)
 	var domain models.Domain
-	db.DB.Where("domain_name = ?", cleanDomain).FirstOrCreate(&domain, models.Domain{
-		DomainName: cleanDomain,
-		Status:     "pending",
-	})
+	err := db.DB.Where("domain_name = ?", cleanDomain).First(&domain).Error
+	if err != nil {
+		// Domain doesn't exist, safely create it
+		domain = models.Domain{DomainName: cleanDomain, Status: "pending"}
+		db.DB.Create(&domain)
+	} else {
+		// Domain exists, just update the status
+		db.DB.Model(&domain).Update("status", "pending")
+	}
 
 	// 2. Perform INSTANT Root Domain Analysis
 	mainReport := scanner.PerformDeepTLSScan(cleanDomain, "")
 
-	rootStatus := "root_scanned"
-	if mainReport.DetectedAlgorithm == "OFFLINE" {
-		rootStatus = "root_scan_failed"
-	}
-
-	db.DB.Model(&domain).Updates(map[string]interface{}{
-		"status":       rootStatus,
-		"last_scanned": time.Now(),
-	})
-
 	return c.Status(200).JSON(fiber.Map{
 		"message":     "Root analysis completed successfully",
 		"domain_id":   domain.ID,
-		"status":      rootStatus,
 		"main_report": mainReport,
 	})
 }

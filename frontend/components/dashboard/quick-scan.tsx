@@ -2,11 +2,18 @@
 
 import { useState, useEffect } from 'react'
 import { 
-  Search, Loader2, ShieldCheck, Cpu, Lock, TriangleAlert, Zap, 
+  Search, Loader2, ShieldCheck, Cpu, Lock, TriangleAlert, Zap,
   Activity, Globe, Download, CheckCircle2, Radar, Target
 } from 'lucide-react'
 import { toast } from 'sonner' 
 import { api } from '@/lib/api'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 // Maps exactly to the EnrichedPQCReport from your Go backend
 interface EnrichedPQCReport {
@@ -29,6 +36,7 @@ interface SubdomainReport {
   hostname: string
   detected_algorithm: string
   tls_version: string
+  issuer: string
   security_score: number
   is_pqc_enabled: boolean
 }
@@ -43,6 +51,13 @@ export default function QuickScanWidget() {
   const [mainReport, setMainReport] = useState<EnrichedPQCReport | null>(null)
   const [subdomains, setSubdomains] = useState<SubdomainReport[]>([])
   const [progress, setProgress] = useState({ scanned: 0, total: 0 })
+  const [selectedSubdomain, setSelectedSubdomain] = useState<SubdomainReport | null>(null)
+
+  const parseDomainId = (payload: any): number | null => {
+    const direct = payload?.domain_id ?? payload?.domainId ?? payload?.domain?.id
+    const parsed = Number(direct)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }
 
   // 🟢 Phase 1: Scan Root Domain Instantly
   const handleStartRootScan = async (e?: React.FormEvent) => {
@@ -57,10 +72,30 @@ export default function QuickScanWidget() {
 
     try {
       const data = await api.startRootScan(domainInput.trim())
+      const normalizedDomain = domainInput.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '')
+
+      let resolvedDomainId = parseDomainId(data)
+      if (!resolvedDomainId) {
+        const domains = await api.getDomains()
+        const match = domains.find((d: any) => {
+          const value = String(d?.domain_name || d?.domain || '').toLowerCase().replace(/^www\./, '')
+          return value === normalizedDomain
+        })
+        if (match) {
+          const parsed = Number(match.id)
+          if (Number.isFinite(parsed) && parsed > 0) {
+            resolvedDomainId = parsed
+          }
+        }
+      }
       
       setMainReport(data.main_report)
-      setActiveDomainId(data.domain_id)
+      setActiveDomainId(resolvedDomainId)
       setScanPhase('root_completed')
+
+      if (!resolvedDomainId) {
+        toast.error('Root scan succeeded but no domain id was returned. Please add the domain in inventory and try again.')
+      }
       
       toast.success(`Root Analysis Complete`, {
         description: `Domain ${domainInput} has been verified.`,
@@ -75,7 +110,10 @@ export default function QuickScanWidget() {
 
   // 🟢 Phase 2: User Authorizes Deep Subdomain OSINT Scan
   const handleLaunchSubdomainScan = async () => {
-    if (!activeDomainId) return
+    if (!activeDomainId) {
+      toast.error('Cannot start subdomain scan: missing domain id from root scan response.')
+      return
+    }
 
     setScanPhase('sub_scanning')
     toast.info("OSINT Pipeline Launched", {
@@ -115,12 +153,20 @@ export default function QuickScanWidget() {
                 hostname: sub.hostname || sub.Hostname,
                 detected_algorithm: cert.key_length || cert.KeyLength || "Unknown",
                 tls_version: cert.tls_version || cert.TLSVersion || "Unknown",
+                issuer: cert.issuer || cert.Issuer || 'Unknown',
                 security_score: cert.q_score || cert.QScore || 0,
                 is_pqc_enabled: (cert.q_score || cert.QScore || 0) >= 80,
               }
             })
 
-          setSubdomains(formattedSubs)
+          const uniqueByHostname = new Map<string, SubdomainReport>()
+          for (const item of formattedSubs) {
+            if (item.hostname && !uniqueByHostname.has(item.hostname)) {
+              uniqueByHostname.set(item.hostname, item)
+            }
+          }
+
+          setSubdomains(Array.from(uniqueByHostname.values()))
 
           // Finish the scan
           if (data.status === 'completed' || data.status === 'halted') {
@@ -186,6 +232,7 @@ export default function QuickScanWidget() {
 
   const progressPercent = progress.total > 0 ? Math.round((progress.scanned / progress.total) * 100) : 0
   const isScanning = scanPhase === 'root_scanning' || scanPhase === 'sub_scanning'
+  const safeSubdomains = subdomains.filter((sub) => sub.is_pqc_enabled).length
 
   return (
     <div className="space-y-6 w-full max-w-6xl mx-auto">
@@ -219,6 +266,21 @@ export default function QuickScanWidget() {
       {/* Main Results Dashboard */}
       {mainReport && (
         <div className="bg-[#0f1219] rounded-2xl border border-white/5 p-8 shadow-2xl text-white animate-in fade-in slide-in-from-bottom-4 duration-500">
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+            <div className="rounded-xl border border-white/10 bg-[#161b22] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-white/50">Selected Domain</p>
+              <p className="mt-1 text-sm font-mono text-white/90 truncate">{mainReport.hostname}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-[#161b22] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-white/50">Subdomains Analyzed</p>
+              <p className="mt-1 text-lg font-semibold text-white">{subdomains.length}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-[#161b22] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-white/50">PQC Safe Subdomains</p>
+              <p className="mt-1 text-lg font-semibold text-green-400">{safeSubdomains}</p>
+            </div>
+          </div>
           
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
             <div>
@@ -375,7 +437,8 @@ export default function QuickScanWidget() {
               </div>
               <button 
                 onClick={handleLaunchSubdomainScan}
-                className="shrink-0 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(168,85,247,0.4)]"
+                disabled={!activeDomainId}
+                className="shrink-0 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-900/40 disabled:cursor-not-allowed text-white px-6 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(168,85,247,0.4)]"
               >
                 <Target className="w-4 h-4" /> Launch Subdomain Scan
               </button>
@@ -389,7 +452,7 @@ export default function QuickScanWidget() {
               <div className="p-5 border-b border-white/5 bg-[#1c212b]">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-white font-bold flex items-center gap-2">
-                    <Radar className="w-5 h-5 text-purple-400" /> Infrastructure Threat Map
+                    <Radar className="w-5 h-5 text-purple-400" /> Subdomain Scan Results
                   </h3>
                   
                   <div className="text-xs font-mono">
@@ -428,13 +491,14 @@ export default function QuickScanWidget() {
                       <th className="px-6 py-4">Hostname</th>
                       <th className="px-6 py-4">Key Exchange</th>
                       <th className="px-6 py-4">Protocol</th>
-                      <th className="px-6 py-4">Status</th>
+                      <th className="px-6 py-4">PQC Status</th>
+                      <th className="px-6 py-4">Details</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5 relative">
                     {subdomains.length === 0 && scanPhase === 'sub_scanning' && (
                        <tr>
-                         <td colSpan={4} className="p-8 text-center text-white/40 text-sm font-mono">
+                         <td colSpan={5} className="p-8 text-center text-white/40 text-sm font-mono">
                            Waiting for first response...
                          </td>
                        </tr>
@@ -446,10 +510,18 @@ export default function QuickScanWidget() {
                         <td className="px-6 py-4 font-mono text-xs">{sub.tls_version}</td>
                         <td className="px-6 py-4">
                           {sub.is_pqc_enabled ? (
-                            <span className="text-[#4ade80] bg-[#4ade80]/10 border border-[#4ade80]/20 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide">Quantum Safe</span>
+                            <span className="text-[#4ade80] bg-[#4ade80]/10 border border-[#4ade80]/20 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide">PQC Safe</span>
                           ) : (
-                            <span className="text-[#f87171] bg-[#f87171]/10 border border-[#f87171]/20 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide">HNDL Risk</span>
+                            <span className="text-[#f87171] bg-[#f87171]/10 border border-[#f87171]/20 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide">Not Safe</span>
                           )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <button
+                            onClick={() => setSelectedSubdomain(sub)}
+                            className="text-xs px-2 py-1 rounded border border-white/20 hover:border-white/40 text-white/80 hover:text-white"
+                          >
+                            View
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -458,6 +530,44 @@ export default function QuickScanWidget() {
               </div>
             </div>
           )}
+
+          <Dialog open={!!selectedSubdomain} onOpenChange={(open) => !open && setSelectedSubdomain(null)}>
+            <DialogContent className="bg-[#0f1219] border border-white/10 text-white max-w-xl">
+              <DialogHeader>
+                <DialogTitle>Subdomain Scan Details</DialogTitle>
+                <DialogDescription className="text-white/60">
+                  Deep scan metadata for the selected subdomain under the currently scanned root domain.
+                </DialogDescription>
+              </DialogHeader>
+
+              {selectedSubdomain && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2 text-sm">
+                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3 sm:col-span-2">
+                    <p className="text-[11px] uppercase tracking-wide text-white/50">Hostname</p>
+                    <p className="mt-1 font-mono text-white/90 break-all">{selectedSubdomain.hostname}</p>
+                  </div>
+                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-white/50">TLS Version</p>
+                    <p className="mt-1 text-white/90">{selectedSubdomain.tls_version}</p>
+                  </div>
+                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-white/50">Issuer</p>
+                    <p className="mt-1 text-white/90">{selectedSubdomain.issuer}</p>
+                  </div>
+                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3 sm:col-span-2">
+                    <p className="text-[11px] uppercase tracking-wide text-white/50">Key Exchange / Algorithm</p>
+                    <p className="mt-1 font-mono text-white/90">{selectedSubdomain.detected_algorithm}</p>
+                  </div>
+                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3 sm:col-span-2">
+                    <p className="text-[11px] uppercase tracking-wide text-white/50">PQC Classification</p>
+                    <p className={selectedSubdomain.is_pqc_enabled ? 'mt-1 text-green-400 font-semibold' : 'mt-1 text-red-400 font-semibold'}>
+                      {selectedSubdomain.is_pqc_enabled ? 'PQC Safe' : 'Not Safe'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
 
         </div>
       )}
