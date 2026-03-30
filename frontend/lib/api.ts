@@ -3,10 +3,10 @@ import * as mockData from './mock-data'
 
 // const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
 // const API_BASE_URL = "http://localhost:8080/api/v1" // Placeholder since no backend is configured
-const API_BASE_URL = "https://randomshit-1.onrender.com/api/v1" // Placeholder since no backend is configured
+// const API_BASE_URL = "https://randomshit-1.onrender.com/api/v1" // Placeholder since no backend is configured
 
-// const API_BASE_URL =
-//   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1"
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1"
 // Demo mode - uses mock data when no API is configured
 // Always true when API_BASE_URL is not set (undefined, null, or empty)
 function isDemoMode(): boolean {
@@ -474,17 +474,45 @@ getDomainSubdomains: async (id: number) => {
   },
 
   // Scanner
-  async startScan(domainId: number) {
+  async startRootScan(domain: string) {
     if (IS_DEMO_MODE) {
       await simulateDelay()
-      return { success: true, scanId: Date.now(), message: 'Scan started' }
+      return {
+        success: true,
+        message: 'Root scan completed',
+        status: 'root_scanned',
+        domain_id: Date.now(),
+        main_report: {
+          hostname: domain,
+          detected_algorithm: 'X25519 (Classical)',
+          tls_version: 'TLS 1.3',
+          security_score: 60,
+          cert_issuer: 'Demo CA',
+        },
+      }
     }
     const res = await fetchWithTimeout(`${API_BASE_URL}/scan/start`, {
       method: 'POST',
-      body: JSON.stringify({ domain_id: domainId }),
+      body: JSON.stringify({ domain }),
     })
-    if (!res.ok) await throwApiError(res, 'Failed to start scan')
+    if (!res.ok) await throwApiError(res, 'Failed to run root scan')
     return res.json()
+  },
+
+  async startSubdomainScan(domainId: number) {
+    if (IS_DEMO_MODE) {
+      await simulateDelay()
+      return { success: true, status: 'scanning', message: 'Subdomain scan started' }
+    }
+    const res = await fetchWithTimeout(`${API_BASE_URL}/scan/${domainId}/subdomains`, {
+      method: 'POST',
+    })
+    if (!res.ok) await throwApiError(res, 'Failed to start subdomain scan')
+    return res.json()
+  },
+
+  async startScan(domainId: number) {
+    return this.startSubdomainScan(domainId)
   },
 
   async getScanStatus(domainId: number) {
