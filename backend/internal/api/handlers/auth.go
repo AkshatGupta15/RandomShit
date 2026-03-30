@@ -130,11 +130,7 @@ func LoginUser(c *fiber.Ctx) error {
 		"challenge_id":       challengeID,
 		"expires_in_seconds": 300,
 	}
-
-	env := os.Getenv("ENV")
-	if env != "production" {
-		response["otp_hint"] = otp
-	}
+	response["otp_hint"] = otp
 
 	return c.JSON(response)
 }
