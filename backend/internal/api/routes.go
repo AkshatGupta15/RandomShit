@@ -37,12 +37,12 @@ func SetupRoutes(app *fiber.App) {
 	// 4. SCANNER ORCHESTRATION (The Background Engine)
 	// ==========================================
 	scan := v1.Group("/scan")
-	scan.Post("/start", handlers.StartPipeline)             // Triggers the heavy background worker
-	scan.Post("/stop/:domainId", handlers.StopPipeline)     // Emergency halt
-	scan.Get("/status/:domainId", handlers.GetScanProgress) // Real-time % complete for the UI loader
+	scan.Post("/start", handlers.StartRootScan)                    // PHASE 1: Instant Root Domain Scan
+	scan.Post("/:id/subdomains", handlers.LaunchSubdomainPipeline) // PHASE 2: Heavy Background OSINT
+	scan.Post("/stop/:domainId", handlers.StopPipeline)            // Emergency halt (Kill Switch)
+	scan.Get("/status/:domainId", handlers.GetScanProgress)        // Real-time % complete + Subdomain Data
 	scan.Get("/live-topology", handlers.GetLiveTopology)
 	scan.Get("/discovery-feed", handlers.GetDiscoveryFeed)
-	scan.Post("/quick", handlers.RunQuickScan)
 
 	// ==========================================
 	// 5. ROOT DOMAIN MANAGEMENT (The targets)

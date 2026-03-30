@@ -18,52 +18,84 @@ import (
 var ActiveScans sync.Map
 
 type ScanRequest struct {
-	DomainID uint `json:"domain_id"`
+	Domain string `json:"domain"`
 }
 
-// StartPipeline - POST /api/v1/scan/start
-func StartPipeline(c *fiber.Ctx) error {
+// 🟢 PHASE 1: StartRootScan - POST /api/v1/scan/start
+// Does an instant pure mathematical TLS handshake on the root domain ONLY.
+func StartRootScan(c *fiber.Ctx) error {
 	var req ScanRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid JSON payload"})
 	}
 
-	if req.DomainID == 0 {
-		return c.Status(400).JSON(fiber.Map{"error": "domain_id is required"})
+	req.Domain = strings.TrimSpace(strings.ToLower(req.Domain))
+	if req.Domain == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Domain is required"})
 	}
 
+	cleanDomain := strings.TrimPrefix(req.Domain, "https://")
+	cleanDomain = strings.TrimPrefix(cleanDomain, "http://")
+
+	// 1. Fetch or Create Domain in DB
 	var domain models.Domain
-	// Fetch domain by ID
-	if err := db.DB.First(&domain, req.DomainID).Error; err != nil {
+	db.DB.Where("domain_name = ?", cleanDomain).FirstOrCreate(&domain, models.Domain{
+		DomainName: cleanDomain,
+		Status:     "pending",
+	})
+
+	// 2. Perform INSTANT Root Domain Analysis
+	mainReport := scanner.PerformDeepTLSScan(cleanDomain, "")
+
+	rootStatus := "root_scanned"
+	if mainReport.DetectedAlgorithm == "OFFLINE" {
+		rootStatus = "root_scan_failed"
+	}
+
+	db.DB.Model(&domain).Updates(map[string]interface{}{
+		"status":       rootStatus,
+		"last_scanned": time.Now(),
+	})
+
+	return c.Status(200).JSON(fiber.Map{
+		"message":     "Root analysis completed successfully",
+		"domain_id":   domain.ID,
+		"status":      rootStatus,
+		"main_report": mainReport,
+	})
+}
+
+// 🟢 PHASE 2: LaunchSubdomainPipeline - POST /api/v1/scan/:id/subdomains
+// Triggers the heavy background OSINT discovery and concurrent TLS probing.
+func LaunchSubdomainPipeline(c *fiber.Ctx) error {
+	domainID := c.Params("id")
+
+	var domain models.Domain
+	if err := db.DB.First(&domain, domainID).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Domain not found"})
 	}
 
-	// 1. Check if it's already running to prevent duplicate background workers
 	if domain.Status == "scanning" {
-		return c.Status(409).JSON(fiber.Map{
-			"error": "Scan is already in progress for this domain",
-		})
+		return c.Status(409).JSON(fiber.Map{"error": "Scan is already in progress for this domain"})
 	}
 
-	// 2. Reset progress trackers for a fresh scan
+	// 1. Reset progress trackers for a fresh scan
 	db.DB.Model(&domain).Updates(map[string]interface{}{
 		"status":         "scanning",
 		"total_assets":   0,
 		"scanned_assets": 0,
 	})
 
-	// 3. Create the Kill Switch (Cancellable Context)
+	// 2. Create the Kill Switch (Cancellable Context)
 	ctx, cancel := context.WithCancel(context.Background())
 	ActiveScans.Store(domain.ID, cancel)
 
-	// 4. Fire the background pipeline
-	// Notice we pass the 'ctx' so the pipeline knows when to stop
+	// 3. Fire the background pipeline
 	go scanner.RunEnterprisePipeline(ctx, domain.ID, domain.DomainName)
 
 	return c.Status(202).JSON(fiber.Map{
-		"message":   "Pipeline initiated successfully in the background",
-		"domain_id": domain.ID,
-		"status":    "scanning",
+		"message": "Subdomain OSINT pipeline initiated",
+		"status":  "scanning",
 	})
 }
 
@@ -71,23 +103,22 @@ func StartPipeline(c *fiber.Ctx) error {
 func StopPipeline(c *fiber.Ctx) error {
 	domainID := c.Params("domainId")
 
-	// 1. Verify the domain exists
 	var domain models.Domain
 	if err := db.DB.First(&domain, domainID).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Domain not found in database"})
 	}
 
-	// 2. Look for the active kill switch in our sync.Map
+	// Look for the active kill switch in our sync.Map
 	cancelFunc, exists := ActiveScans.Load(domain.ID)
 	if !exists {
 		return c.Status(400).JSON(fiber.Map{"error": "No active scan found for this domain to halt"})
 	}
 
-	// 3. Pull the trigger to terminate the goroutine
+	// Pull the trigger to terminate the goroutine
 	cancelFunc.(context.CancelFunc)()
 	ActiveScans.Delete(domain.ID)
 
-	// 4. Update the database to reflect the halt
+	// Update the database to reflect the halt
 	db.DB.Model(&domain).Update("status", "halted")
 
 	return c.JSON(fiber.Map{
@@ -101,7 +132,8 @@ func GetScanProgress(c *fiber.Ctx) error {
 	domainID := c.Params("domainId")
 
 	var domain models.Domain
-	if err := db.DB.First(&domain, domainID).Error; err != nil {
+	// CRITICAL: Preload Subdomains AND their SSLCerts so the React table can populate!
+	if err := db.DB.Preload("Subdomains.SSLCert").First(&domain, domainID).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Domain not found"})
 	}
 
@@ -110,8 +142,7 @@ func GetScanProgress(c *fiber.Ctx) error {
 	if domain.TotalAssets > 0 {
 		percentage = (float64(domain.ScannedAssets) / float64(domain.TotalAssets)) * 100
 	} else if domain.Status == "scanning" {
-		// If it's scanning but total_assets is 0, we are still in the DNS discovery phase
-		percentage = 5.0
+		percentage = 5.0 // DNS discovery phase
 	} else if domain.Status == "completed" {
 		percentage = 100.0
 	}
@@ -122,6 +153,7 @@ func GetScanProgress(c *fiber.Ctx) error {
 		"status":         domain.Status,
 		"total_assets":   domain.TotalAssets,
 		"scanned_assets": domain.ScannedAssets,
+		"subdomains":     domain.Subdomains, // This now contains the real crypto data
 		"percentage":     fmt.Sprintf("%.2f", percentage),
 	})
 }
@@ -138,7 +170,7 @@ func GetDiscoveryFeed(c *fiber.Ctx) error {
 	}
 
 	query := db.DB.Model(&models.Subdomain{}).
-		Where("is_alive = ?", true).
+		Where("scan_status = ?", "completed").
 		Preload("SSLCert").
 		Preload("Services").
 		Order("created_at desc").
@@ -171,15 +203,17 @@ func GetDiscoveryFeed(c *fiber.Ctx) error {
 			tier := strings.ToLower(strings.TrimSpace(sub.SSLCert.PQCTier))
 			switch tier {
 			case "elite":
+			case "quantum safe":
 				status = "elite"
 			case "legacy":
+			case "critical legacy":
 				status = "legacy"
 			default:
 				status = "standard"
 			}
 
 			risk := strings.ToLower(strings.TrimSpace(sub.SSLCert.RiskLabel))
-			if strings.Contains(risk, "critical") || strings.Contains(risk, "high") {
+			if strings.Contains(risk, "critical") || strings.Contains(risk, "high") || strings.Contains(risk, "vulnerable") {
 				status = "critical"
 			}
 		}
