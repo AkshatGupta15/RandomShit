@@ -15,6 +15,8 @@ import {
   Clock,
   Activity,
   Zap,
+  FileJson,
+  Printer,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -91,6 +93,16 @@ export default function ScannerPage() {
   const [discoveredAssets, setDiscoveredAssets] = useState<DiscoveredAsset[]>([])
   const [isStarting, setIsStarting] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
+
+  const triggerUrlDownload = useCallback((url: string) => {
+    const link = document.createElement('a')
+    link.href = url
+    link.target = '_blank'
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }, [])
 
   const { data: domainsResponse, isLoading: domainsLoading } = useSWR<{ data: unknown[] }>(
     'scanner-domains',
@@ -321,6 +333,26 @@ export default function ScannerPage() {
     }
   }
 
+  const handleDownloadCBOM = async () => {
+    if (!selectedDomainId) return
+
+    try {
+      triggerUrlDownload(api.getCBOMDownloadUrl(selectedDomainId))
+    } catch (error) {
+      console.error('CBOM download failed', error)
+    }
+  }
+
+  const handleDownloadReport = async () => {
+    if (!selectedDomainId) return
+
+    try {
+      triggerUrlDownload(api.getPDFReportDownloadUrl(selectedDomainId))
+    } catch (error) {
+      console.error('Report download failed', error)
+    }
+  }
+
   const selectedDomain = domains?.find(d => d.id === selectedDomainId)
   const isScanning = scanStatus.status === 'root_scanning' || scanStatus.status === 'subdomain_scanning'
 
@@ -530,7 +562,7 @@ export default function ScannerPage() {
           {rootScanReport && (
             <div className="glass rounded-xl p-6 border border-border/50">
               <h3 className="text-sm font-medium text-muted-foreground mb-4">Root Domain Analysis</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-4">
                 <div className="p-3 rounded-lg bg-secondary/30">
                   <p className="text-xs text-muted-foreground mb-1">Algorithm</p>
                   <p className="font-mono text-foreground">{rootScanReport.detected_algorithm || 'Unknown'}</p>
@@ -547,6 +579,26 @@ export default function ScannerPage() {
                   <p className="text-xs text-muted-foreground mb-1">Issuer</p>
                   <p className="font-mono text-foreground truncate">{rootScanReport.cert_issuer || 'Unknown'}</p>
                 </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleDownloadCBOM}
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 gap-2"
+                >
+                  <FileJson className="h-4 w-4" />
+                  Download CBOM
+                </Button>
+                <Button
+                  onClick={handleDownloadReport}
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 gap-2"
+                >
+                  <Printer className="h-4 w-4" />
+                  Download Report
+                </Button>
               </div>
             </div>
           )}

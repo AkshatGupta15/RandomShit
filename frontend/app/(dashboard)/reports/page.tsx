@@ -69,21 +69,22 @@ export default function ReportsPage() {
   const domainList = Array.isArray(domains) ? domains : []
   const selectedDomain = domainList.find(d => d.id === selectedDomainId)
 
+  const triggerUrlDownload = (url: string) => {
+    const a = document.createElement('a')
+    a.href = url
+    a.target = '_blank'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+
   const handleDownloadCBOM = async () => {
     if (!selectedDomainId) return
 
     setIsDownloadingCBOM(true)
     try {
-      const cbom = await api.downloadCBOM(selectedDomainId)
-      const blob = new Blob([JSON.stringify(cbom, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `cbom_${selectedDomain?.domain_name || 'report'}.json`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      triggerUrlDownload(api.getCBOMDownloadUrl(selectedDomainId))
     } catch (error) {
       console.error('Failed to download CBOM:', error)
     } finally {
@@ -96,28 +97,7 @@ export default function ReportsPage() {
 
     setIsDownloadingPDF(true)
     try {
-      const htmlContent = await api.downloadPDFReport(selectedDomainId)
-
-      // Save generated report as an .html file (manual PDF conversion via browser Print to PDF)
-      const blob = new Blob([htmlContent], { type: 'text/html' })
-      const url = URL.createObjectURL(blob)
-      const fileName = `pnb_report_${selectedDomain?.domain_name || selectedDomainId}.html`
-
-      const a = document.createElement('a')
-      a.href = url
-      a.download = fileName
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-
-      // offer print experience in new tab
-      const printWindow = window.open('', '_blank')
-      if (printWindow) {
-        printWindow.document.write(htmlContent)
-        printWindow.document.close()
-        printWindow.focus()
-      }
+      triggerUrlDownload(api.getPDFReportDownloadUrl(selectedDomainId))
     } catch (error) {
       console.error('Failed to download PDF:', error)
     } finally {

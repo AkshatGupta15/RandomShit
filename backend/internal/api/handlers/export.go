@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"html"
 	"io"
 	"log"
 	"net/http"
@@ -15,6 +14,7 @@ import (
 	"github.com/AkshatGupta15/RandomShit/backend/internal/core/scanner"
 	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
 	"github.com/AkshatGupta15/RandomShit/backend/internal/models"
+	"github.com/go-pdf/fpdf"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -127,7 +127,13 @@ func GenerateCBOM(c *fiber.Ctx) error {
 	// 5. Return the formatted JSON file
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"cbom_%s.json\"", domain.DomainName))
 	c.Set("Content-Type", "application/json")
-	return c.JSON(cbom)
+
+	formatted, err := json.MarshalIndent(cbom, "", "  ")
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to serialize CBOM"})
+	}
+
+	return c.Send(formatted)
 }
 
 // DownloadCBOMJson - GET /api/v1/export/cbom (Global Enterprise)
@@ -145,7 +151,13 @@ func DownloadCBOMJson(c *fiber.Ctx) error {
 
 	c.Set("Content-Disposition", "attachment; filename=\"pnb_global_cbom.json\"")
 	c.Set("Content-Type", "application/json")
-	return c.JSON(cbom)
+
+	formatted, err := json.MarshalIndent(cbom, "", "  ")
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to serialize CBOM"})
+	}
+
+	return c.Send(formatted)
 }
 
 // Helper function to keep CBOM logic DRY
@@ -208,17 +220,39 @@ func generateAIDescription(prompt string) string {
 	apiKey := os.Getenv("API_KEY")
 	if apiKey == "" {
 		log.Println("ERROR: GROQ_API_KEY not set")
-		return "System Alert: Groq API key is not configured."
+		return "System Alert: Groq API key is not configured. AI Analysis skipped."
 	}
 
 	url := "https://api.groq.com/openai/v1/chat/completions"
 
 	payload := map[string]interface{}{
-		"model": "llama-3.3-70b-versatile", // free model with good performance
+		"model": "llama-3.3-70b-versatile", // 🟢 Upgraded to powerful 70B model
 		"messages": []map[string]interface{}{
 			{
-				"role":    "system",
-				"content": "You are an elite Cyber Threat Analyst for Punjab National Bank. Write in a formal, authoritative, banking-executive tone. No markdown formatting.",
+				"role": "system",
+				"content": `
+You are both:
+1. Chief Information Security Officer (CISO)
+2. Senior Cryptography Engineer
+
+Output STRICTLY in 2 sections:
+
+Section 1: Executive Risk Summary
+- 2 paragraphs
+- Business + compliance + HNDL
+
+Section 2: Technical Cryptographic Analysis
+- Deep technical explanation
+- Include:
+  - TLS handshake behavior
+  - Hybrid key exchange (X25519 + ML-KEM-768)
+  - Forward secrecy implications
+  - Backward compatibility risks
+  - Attack surface (subdomains, downgrade risks)
+  - Migration recommendations
+
+No markdown. No bullet points. Clear structured paragraphs.
+`,
 			},
 			{
 				"role":    "user",
@@ -231,38 +265,26 @@ func generateAIDescription(prompt string) string {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("Failed to marshal payload: %v", err)
 		return "System Alert: Internal error preparing AI request."
 	}
 
-	log.Printf("Sending request to Groq: %s", url)
-	log.Printf("Request body: %s", string(body))
-
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
-		log.Printf("Failed to create request: %v", err)
 		return "System Alert: Network error."
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Network error: %v", err)
 		return "System Alert: Network error reaching Groq API."
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Failed to read response: %v", err)
 		return "System Alert: Failed to read AI response."
-	}
-	log.Printf("Response status: %d, body: %s", resp.StatusCode, string(bodyBytes))
-
-	if resp.StatusCode != 200 {
-		return fmt.Sprintf("System Alert: Groq API error (HTTP %d). Check logs.", resp.StatusCode)
 	}
 
 	var result struct {
@@ -273,138 +295,222 @@ func generateAIDescription(prompt string) string {
 		} `json:"choices"`
 	}
 
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		log.Printf("Failed to decode response: %v", err)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil || len(result.Choices) == 0 {
 		return "System Alert: Failed to parse AI response."
 	}
 
-	if len(result.Choices) == 0 {
-		log.Printf("No choices in response")
-		return "System Alert: AI returned no content."
-	}
-
-	text := result.Choices[0].Message.Content
-	log.Printf("AI response: %s", text)
-	return text
+	return result.Choices[0].Message.Content
 }
 
 // ==========================================
 // PDF REPORT GENERATION
 // ==========================================
 
-// DownloadPDFReport - Handles BOTH GET /api/v1/export/pdf-report and /pdf-report/:domainId
+// DownloadPDFReport - GET /api/v1/export/pdf-report/:domainId
+// ==========================================
+// PDF REPORT GENERATION
+// ==========================================
+
+// DownloadPDFReport - GET /api/v1/export/pdf-report/:domainId
 func DownloadPDFReport(c *fiber.Ctx) error {
 	domainID := c.Params("domainId")
 
-	var domainName, domainDescription string
-	var totalAssets, eliteAssets, legacyAssets int64
+	var domain models.Domain
+	var subdomains []models.Subdomain
+	var domainName string
 
-	// If a specific Domain ID was passed, filter for it
+	// 1. Fetch Domain & Subdomains
 	if domainID != "" {
-		var domain models.Domain
-		if err := db.DB.Preload("Subdomains.SSLCert").First(&domain, domainID).Error; err != nil {
+		if err := db.DB.First(&domain, domainID).Error; err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "Domain not found"})
 		}
 		domainName = domain.DomainName
-		domainDescription = fmt.Sprintf("Target Domain: %s", domain.DomainName)
 
-		totalAssets = int64(len(domain.Subdomains))
-		for _, sub := range domain.Subdomains {
-			if sub.SSLCert != nil {
-				if sub.SSLCert.PQCTier == "Elite" {
-					eliteAssets++
-				} else if sub.SSLCert.PQCTier != "Elite" {
-					legacyAssets++
-				}
-			}
-		}
+		// 🟢 FILTER: Only preload subdomains that have an associated SSL Certificate
+		db.DB.Where("domain_id = ?", domain.ID).
+			Preload("SSLCert").
+			Preload("Services").
+			Joins("JOIN ssl_certificates ON ssl_certificates.subdomain_id = subdomains.id").
+			Find(&subdomains)
 	} else {
-		// Global Infrastructure Report
-		domainName = "Entire PNB Infrastructure"
-		domainDescription = "Global Enterprise Assets"
-		db.DB.Model(&models.Subdomain{}).Count(&totalAssets)
-		db.DB.Model(&models.SSLCertificate{}).Where("pqc_tier = ?", "Elite").Count(&eliteAssets)
-		db.DB.Model(&models.SSLCertificate{}).Where("pqc_tier != ?", "Elite").Count(&legacyAssets)
+		return c.Status(400).JSON(fiber.Map{"error": "Domain ID required"})
 	}
 
-	// The tuned Gemini Prompt
-	aiPrompt := fmt.Sprintf(`Analyze the following Post-Quantum Cryptography (PQC) metrics for %s:
-- Total Endpoints: %d
-- Quantum-Safe (NIST FIPS 203 ML-KEM): %d
-- Vulnerable/Legacy Protocols: %d
+	// 2. LIVE ROOT SCAN (for current dashboard state)
+	rootReport := scanner.PerformDeepTLSScan(domainName, "")
+	// Build AI prompt
+	aiPrompt := fmt.Sprintf(`
+Analyze this TLS and cryptographic posture:
 
-Provide a concise, 2-paragraph executive summary. Focus on the immediate risk of 'Harvest Now, Decrypt Later' (HNDL) attacks against the legacy assets, and outline the strategic compliance posture. Keep it extremely professional.`,
-		domainName, totalAssets, eliteAssets, legacyAssets)
+Domain: %s
+Key Exchange: %s
+TLS Version: %s
+Quantum Risk Score: %d%%
+Security Score: %d/100
+Subdomains: %d
 
+Context:
+- Hybrid PQC enabled if ML-KEM present
+- Legacy risk if classical algorithms still active
+- Assume attacker can store encrypted traffic today (HNDL threat)
+
+Explain:
+1. Security posture against quantum adversaries
+2. TLS handshake and hybrid key exchange behavior
+3. Risks due to mixed classical + PQC usage
+4. Subdomain inconsistency risks
+5. Required migration steps to full PQC
+`, domainName, rootReport.DetectedAlgorithm, rootReport.TLSVersion, rootReport.QDayRisk, rootReport.SecurityScore, len(subdomains))
 	aiSummary := generateAIDescription(aiPrompt)
-	formattedSummary := strings.ReplaceAll(html.EscapeString(aiSummary), "\n", "<br>")
 
-	pm := 0.0
-	if totalAssets > 0 {
-		pm = (float64(eliteAssets) / float64(totalAssets)) * 100.0
+	// 3. Document Setup
+	pdf := fpdf.New("L", "mm", "A4", "") // Landscape for data density
+	pdf.SetMargins(15, 15, 15)
+	pdf.SetAutoPageBreak(true, 20)
+	pdf.AddPage()
+
+	// --- Header & Branding ---
+	pdf.SetFont("Helvetica", "B", 26)
+	pdf.SetTextColor(163, 17, 39) // PNB Maroon
+	pdf.CellFormat(0, 12, "PNB QUANTUM SHIELD", "", 1, "L", false, 0, "")
+
+	pdf.SetFont("Helvetica", "B", 12)
+	pdf.SetTextColor(100, 100, 100)
+	pdf.CellFormat(0, 6, "Post-Quantum Cryptographic Audit & Infrastructure Ledger", "", 1, "L", false, 0, "")
+	pdf.SetFont("Helvetica", "", 10)
+	pdf.CellFormat(0, 5, fmt.Sprintf("Target: %s | Generated: %s", domainName, time.Now().Format("Jan 02, 2006")), "", 1, "L", false, 0, "")
+	pdf.Ln(8)
+
+	// --- 🟢 NEW: GUIDANCE SECTION (Report Explanation) 🟢 ---
+	pdf.SetFillColor(245, 245, 245)
+	pdf.SetFont("Helvetica", "B", 11)
+	pdf.SetTextColor(30, 41, 59)
+	pdf.CellFormat(0, 8, "  Methodology & Report Guidance", "LT R", 1, "L", true, 0, "")
+
+	pdf.SetFont("Helvetica", "", 9)
+	pdf.SetTextColor(71, 85, 105)
+	guidance := "This report evaluates infrastructure against NIST FIPS 203 (ML-KEM) standards. " +
+		"A 'Safe' status indicates the endpoint supports Hybrid Post-Quantum Key Exchange, mitigating 'Harvest Now, Decrypt Later' (HNDL) risks. " +
+		"Scores are calculated by starting at 100 and deducting points for: Legacy TLS versions (-15), Classical Key Exchange (-35), and Vulnerable Certificates (-5)."
+	pdf.MultiCell(0, 5, guidance, "LBR", "L", true)
+	pdf.Ln(8)
+
+	// --- PRIMARY DOMAIN ANALYSIS (Dashboard Snapshot) ---
+	pdf.SetFont("Helvetica", "B", 14)
+	pdf.SetTextColor(255, 255, 255)
+	pdf.SetFillColor(163, 17, 39)
+	pdf.CellFormat(0, 9, fmt.Sprintf("  Section 1: Primary Domain Analysis (%s)", domainName), "", 1, "L", true, 0, "")
+	pdf.Ln(2)
+
+	// --- AI EXECUTIVE SUMMARY ---
+	pdf.Ln(5)
+	pdf.SetFont("Helvetica", "B", 14)
+	pdf.SetTextColor(255, 255, 255)
+	pdf.SetFillColor(15, 23, 42)
+	pdf.CellFormat(0, 9, "  Section 1.1: AI Executive Risk Summary", "", 1, "L", true, 0, "")
+	pdf.Ln(2)
+
+	pdf.SetFont("Helvetica", "", 10)
+	pdf.SetTextColor(40, 40, 40)
+	// aiSummary = strings.ReplaceAll(aiSummary, "Section 1: Executive Risk Summary", "")
+	// aiSummary = strings.ReplaceAll(aiSummary, "Section 2: Technical Cryptographic Analysis", "")
+	parts := strings.SplitN(aiSummary, "Section 2:", 2)
+
+	pdf.MultiCell(0, 6, parts[0], "1", "L", false)
+
+	pdf.Ln(3)
+	pdf.SetFont("Helvetica", "B", 12)
+	pdf.CellFormat(0, 8, "Technical Analysis", "", 1, "L", false, 0, "")
+
+	pdf.SetFont("Helvetica", "", 10)
+	pdf.MultiCell(0, 6, "Section 2:"+parts[1], "1", "L", false)
+	pdf.Ln(5)
+
+	// Dashboard-style metrics
+	pdf.SetFont("Helvetica", "B", 10)
+	pdf.SetTextColor(50, 50, 50)
+	pdf.SetFillColor(248, 250, 252)
+	pdf.CellFormat(66, 10, "Algorithm: "+rootReport.DetectedAlgorithm, "1", 0, "C", true, 0, "")
+	pdf.CellFormat(66, 10, fmt.Sprintf("Data Risk: %d%%", rootReport.QDayRisk), "1", 0, "C", true, 0, "")
+	pdf.CellFormat(66, 10, fmt.Sprintf("NIST Score: %d/100", rootReport.SecurityScore), "1", 0, "C", true, 0, "")
+	pdf.CellFormat(69, 10, "Readiness: "+rootReport.TLSVersion, "1", 1, "C", true, 0, "")
+	pdf.Ln(5)
+
+	// Telemetry & Proof
+	pdf.SetFont("Helvetica", "B", 10)
+	pdf.SetTextColor(163, 17, 39)
+	pdf.CellFormat(130, 6, "Live Handshake Telemetry:", "", 0, "L", false, 0, "")
+	pdf.CellFormat(0, 6, "Deterministic Score Calculation:", "", 1, "L", false, 0, "")
+
+	pdf.SetFont("Courier", "", 8)
+	pdf.SetTextColor(80, 80, 80)
+	yStart := pdf.GetY()
+	pdf.MultiCell(125, 4, rootReport.HandshakeText, "1", "L", false)
+
+	pdf.SetXY(145, yStart)
+	for _, log := range rootReport.ScoreBreakdown {
+		pdf.SetX(145)
+		pdf.CellFormat(0, 4, "> "+log, "", 1, "L", false, 0, "")
+	}
+	pdf.SetY(yStart + 25) // Ensure we move past the multicell
+	pdf.Ln(10)
+
+	// --- 🟢 ASSET MATRIX (Only shows domains with TLS) 🟢 ---
+	pdf.SetFont("Helvetica", "B", 14)
+	pdf.SetTextColor(255, 255, 255)
+	pdf.SetFillColor(30, 41, 59)
+	pdf.CellFormat(0, 9, "  Section 2: Discovered Asset Discovery Matrix", "", 1, "L", true, 0, "")
+	pdf.Ln(2)
+
+	// Table Headers
+	pdf.SetFont("Helvetica", "B", 9)
+	pdf.SetFillColor(226, 232, 240)
+	pdf.SetTextColor(15, 23, 42)
+	pdf.CellFormat(75, 8, "Endpoint / Hostname", "1", 0, "L", true, 0, "")
+	pdf.CellFormat(65, 8, "Algorithm (Key Exchange)", "1", 0, "L", true, 0, "")
+	pdf.CellFormat(35, 8, "Transport", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(60, 8, "Certificate Issuer", "1", 0, "L", true, 0, "")
+	pdf.CellFormat(32, 8, "Status", "1", 1, "C", true, 0, "")
+
+	// Table Rows
+	pdf.SetFont("Helvetica", "", 8)
+	for i, sub := range subdomains {
+		if sub.SSLCert == nil {
+			continue
+		} // Redundant safety
+
+		if i%2 == 0 {
+			pdf.SetFillColor(255, 255, 255)
+		} else {
+			pdf.SetFillColor(249, 250, 251)
+		}
+
+		status := "At Risk"
+		if sub.SSLCert.PQCTier == "Elite" || sub.SSLCert.QScore >= 80 {
+			status = "PQC Safe"
+			pdf.SetTextColor(5, 150, 105)
+		} else {
+			pdf.SetTextColor(185, 28, 28)
+		}
+
+		pdf.CellFormat(75, 8, sub.Hostname, "1", 0, "L", true, 0, "")
+		pdf.SetTextColor(50, 50, 50)
+		pdf.CellFormat(65, 8, sub.SSLCert.KeyLength, "1", 0, "L", true, 0, "")
+		pdf.CellFormat(35, 8, sub.SSLCert.TLSVersion, "1", 0, "C", true, 0, "")
+		pdf.CellFormat(60, 8, sub.SSLCert.Issuer, "1", 0, "L", true, 0, "")
+
+		if status == "PQC Safe" {
+			pdf.SetTextColor(5, 150, 105)
+		} else {
+			pdf.SetTextColor(185, 28, 28)
+		}
+		pdf.CellFormat(32, 8, status, "1", 1, "C", true, 0, "")
 	}
 
-	htmlContent := fmt.Sprintf(`
-		<html>
-		<head>
-			<title>PNB Quantum Shield - Executive Report</title>
-			<style>
-				body { font-family: Inter, -apple-system, sans-serif; padding: 40px; color: #1f2937; line-height: 1.6; }
-				.header { border-bottom: 4px solid #800000; padding-bottom: 15px; margin-bottom: 30px; }
-				.pnb-logo { color: #800000; font-size: 32px; font-weight: 900; letter-spacing: -0.5px; }
-				.stat-box { background: #f8fafc; padding: 25px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 30px; }
-				.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 15px; }
-				.stat-item { border-left: 3px solid #800000; padding-left: 15px; }
-				.stat-value { font-size: 24px; font-weight: bold; color: #111827; }
-				.stat-label { font-size: 13px; color: #6b7280; text-transform: uppercase; }
-				.ai-box { background: #fffbeb; border: 1px solid #fde68a; padding: 25px; border-radius: 12px; }
-				.section-head { font-size: 18px; font-weight: 700; margin-bottom: 15px; }
-				.badge { background: #800000; color: white; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; }
-				@media print { button { display: none; } body { padding: 0; } }
-			</style>
-		</head>
-		<body>
-			<div class="header">
-				<div class="pnb-logo">PNB QUANTUM SHIELD</div>
-				<h1 style="margin: 5px 0 0 0; font-size: 20px;">Executive PQC Security Audit</h1>
-				<p style="margin: 5px 0 0; font-size: 14px; color: #6b7280;">Date: %s | Scope: %s</p>
-			</div>
-
-			<div class="stat-box">
-				<div class="section-head">Infrastructure Overview</div>
-				<div class="stat-grid">
-					<div class="stat-item">
-						<div class="stat-value">%d</div>
-						<div class="stat-label">Total Assets Scanned</div>
-					</div>
-					<div class="stat-item">
-						<div class="stat-value" style="color: #059669;">%0.1f%%</div>
-						<div class="stat-label">NIST FIPS 203 Readiness</div>
-					</div>
-					<div class="stat-item">
-						<div class="stat-value" style="color: #059669;">%d</div>
-						<div class="stat-label">Elite ML-KEM Assets</div>
-					</div>
-					<div class="stat-item">
-						<div class="stat-value" style="color: #dc2626;">%d</div>
-						<div class="stat-label">Legacy / Vulnerable Assets</div>
-					</div>
-				</div>
-			</div>
-
-			<div class="ai-box">
-				<div class="section-head">
-					<span class="badge" style="margin-right: 8px;">Gemini AI Analysis</span>
-					Strategic Insights
-				</div>
-				<p style="margin: 0; color: #4b5563;">%s</p>
-			</div>
-
-			<button onclick="window.print()" style="margin-top: 30px; background: #800000; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: bold;">Print PDF Report</button>
-		</body>
-		</html>
-	`, time.Now().Format("January 02, 2026"), domainDescription, totalAssets, pm, eliteAssets, legacyAssets, formattedSummary)
-
-	c.Set("Content-Type", "text/html")
-	return c.SendString(htmlContent)
+	// 5. Stream to response
+	var out bytes.Buffer
+	pdf.Output(&out)
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=PNB_Audit_%s.pdf", domainName))
+	return c.SendStream(bytes.NewReader(out.Bytes()))
 }

@@ -65,6 +65,28 @@ export default function QuickScanWidget() {
   const [progress, setProgress] = useState({ scanned: 0, total: 0 })
   const [selectedSubdomain, setSelectedSubdomain] = useState<SubdomainReport | null>(null)
 
+  const triggerFileDownload = (blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    // Keep URL alive briefly so browser can start download reliably.
+    window.setTimeout(() => URL.revokeObjectURL(url), 3000)
+  }
+
+  const triggerUrlDownload = (url: string) => {
+    const link = document.createElement('a')
+    link.href = url
+    link.target = '_blank'
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
   const parseDomainId = (payload: any): number | null => {
     const direct = payload?.domain_id ?? payload?.domainId ?? payload?.domain?.id
     const parsed = Number(direct)
@@ -187,16 +209,7 @@ export default function QuickScanWidget() {
     }
 
     try {
-      const cbom = await api.downloadCBOM(activeDomainId)
-      const blob = new Blob([JSON.stringify(cbom, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `CBOM_${mainReport?.hostname || activeDomainId}_${Date.now()}.json`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      triggerUrlDownload(api.getCBOMDownloadUrl(activeDomainId))
       toast.success('CBOM downloaded')
     } catch (error) {
       console.error('CBOM download failed', error)
@@ -211,16 +224,7 @@ export default function QuickScanWidget() {
     }
 
     try {
-      const report = await api.downloadPDFReport(activeDomainId)
-      const blob = new Blob([report], { type: 'text/plain;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `Scan_Report_${mainReport?.hostname || activeDomainId}_${Date.now()}.txt`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
+      triggerUrlDownload(api.getPDFReportDownloadUrl(activeDomainId))
       toast.success('Scan report downloaded')
     } catch (error) {
       console.error('Report download failed', error)
@@ -232,7 +236,7 @@ export default function QuickScanWidget() {
   const isScanning = scanPhase === 'root_scanning' || scanPhase === 'sub_scanning'
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-[#A31127]/30 p-4 sm:p-6 lg:p-8">
+    <div className={`${mainReport ? 'min-h-screen' : ''} bg-zinc-950 text-zinc-100 font-sans selection:bg-[#A31127]/30 p-4 sm:p-6 lg:p-8`}>
       <div className="max-w-7xl mx-auto space-y-6">
         
         {/* TOP CONTROL BAR */}

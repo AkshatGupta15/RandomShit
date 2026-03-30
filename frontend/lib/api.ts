@@ -703,14 +703,24 @@ getDomainSubdomains: async (id: number) => {
     if (IS_DEMO_MODE) {
       await simulateDelay()
       const content = `PNB Quantum Shield Security Report\nDomain ID: ${domainId}\nGenerated: ${new Date().toISOString()}\n\nThis is a demo report.`
-      return content
+      return new Blob([content], { type: 'application/pdf' })
     }
 
     // Prefer new detailed domain-specific endpoint, fallback to generic one.
     const endpoint = `${API_BASE_URL}/export/pdf-report/${domainId}`
     const res = await fetchWithTimeout(endpoint)
     if (!res.ok) await throwApiError(res, 'Failed to download report')
-    return res.text()
+    return res.blob()
+  },
+
+  getCBOMDownloadUrl(domainId: number) {
+    const ts = Date.now()
+    return `${API_BASE_URL}/export/cbom/${domainId}?t=${ts}`
+  },
+
+  getPDFReportDownloadUrl(domainId: number) {
+    const ts = Date.now()
+    return `${API_BASE_URL}/export/pdf-report/${domainId}?t=${ts}`
   },
 
   // Discovery feed for scanner
