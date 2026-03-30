@@ -103,6 +103,7 @@ export default function QuickScanWidget() {
       })
       
     } catch (error) {
+      console.error(error)
       toast.error("Failed to initiate scan. Is the backend running?")
       setScanPhase('idle')
     }
