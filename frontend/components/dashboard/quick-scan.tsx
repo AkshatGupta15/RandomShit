@@ -180,6 +180,54 @@ export default function QuickScanWidget() {
     return () => clearInterval(interval)
   }, [activeDomainId, scanPhase])
 
+  const handleDownloadCBOM = async () => {
+    if (!activeDomainId) {
+      toast.error('Run a scan first to generate CBOM.')
+      return
+    }
+
+    try {
+      const cbom = await api.downloadCBOM(activeDomainId)
+      const blob = new Blob([JSON.stringify(cbom, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `CBOM_${mainReport?.hostname || activeDomainId}_${Date.now()}.json`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      toast.success('CBOM downloaded')
+    } catch (error) {
+      console.error('CBOM download failed', error)
+      toast.error('Failed to download CBOM report.')
+    }
+  }
+
+  const handleDownloadReport = async () => {
+    if (!activeDomainId) {
+      toast.error('Run a scan first to export report.')
+      return
+    }
+
+    try {
+      const report = await api.downloadPDFReport(activeDomainId)
+      const blob = new Blob([report], { type: 'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `Scan_Report_${mainReport?.hostname || activeDomainId}_${Date.now()}.txt`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Scan report downloaded')
+    } catch (error) {
+      console.error('Report download failed', error)
+      toast.error('Failed to download scan report.')
+    }
+  }
+
   const progressPercent = progress.total > 0 ? Math.round((progress.scanned / progress.total) * 100) : 0
   const isScanning = scanPhase === 'root_scanning' || scanPhase === 'sub_scanning'
 
@@ -253,10 +301,20 @@ export default function QuickScanWidget() {
                 <p className="text-zinc-500 text-sm">Primary Domain Cryptographic Analysis Complete</p>
               </div>
               <div className="flex gap-3 w-full sm:w-auto">
-                <button title="Download Cryptographic Bill of Materials (JSON format)" className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                <button
+                  onClick={handleDownloadCBOM}
+                  disabled={!activeDomainId}
+                  title="Download Cryptographic Bill of Materials (JSON format)"
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                >
                   <Download className="w-4 h-4 text-zinc-400" /> CBOM
                 </button>
-                <button title="Download human-readable executive PDF report" className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                <button
+                  onClick={handleDownloadReport}
+                  disabled={!activeDomainId}
+                  title="Download human-readable executive report"
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-200 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                >
                   <FileText className="w-4 h-4 text-zinc-400" /> Report
                 </button>
               </div>
@@ -372,49 +430,82 @@ export default function QuickScanWidget() {
                 </div>
 
                 {/* Telemetry Panel */}
-                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex-1">
-                  <InfoTooltip content="Raw socket data extracted directly from the BoringSSL/OpenSSL negotiation phase during testing." className="mb-5 block">
-                    <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-purple-400" /> Live Telemetry
-                    </h3>
-                  </InfoTooltip>
-                  
-                  <div className="bg-zinc-950 rounded-xl p-4 font-mono text-xs text-zinc-400 mb-6 border border-zinc-800/50 shadow-inner overflow-x-auto" title="Raw Handshake Output">
-                    <span className="text-emerald-500 mr-2">$</span>
-                    {mainReport.handshake_text}
-                  </div>
 
-                  <div className="space-y-5">
-                    <div>
-                      <div className="flex justify-between text-xs font-medium text-zinc-400 mb-2">
-                        <InfoTooltip content="Percentage of infrastructure components heavily reliant on legacy elliptic curve cryptography (ECC).">
-                          <span className="border-b border-dashed border-zinc-600 pb-0.5">Vulnerability Footprint</span>
-                        </InfoTooltip>
-                        <span>{mainReport.threat_level}%</span>
-                      </div>
-                      <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden" title={`${mainReport.threat_level}% Vulnerability`}>
-                        <div 
-                          className="h-full bg-gradient-to-r from-[#F5A623] to-[#A31127] transition-all duration-1000 ease-out"
-                          style={{ width: `${mainReport.threat_level}%` }}
-                        />
-                      </div>
-                    </div>
+                <div className="flex flex-col md:flex-row gap-6 flex-1">
 
-                    <div>
-                      <div className="flex justify-between text-xs font-medium text-zinc-400 mb-2">
-                        <InfoTooltip content="Percentage of load balancers and front-end gateways successfully upgraded to support hybrid Key Encapsulation Mechanisms (KEMs).">
-                          <span className="border-b border-dashed border-zinc-600 pb-0.5">PQC Architecture Readiness</span>
-                        </InfoTooltip>
-                        <span>{mainReport.readiness}%</span>
-                      </div>
-                      <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden" title={`${mainReport.readiness}% Ready`}>
-                        <div 
-                          className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-1000 ease-out"
-                          style={{ width: `${mainReport.readiness}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
+                {mainReport.score_breakdown && mainReport.score_breakdown.length > 0 && (
+  <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex-1 flex flex-col">
+    <InfoTooltip content="Deterministic mathematical ledger showing exact penalty deductions from the baseline FIPS 203 perfect score." className="mb-5 block">
+      <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+        <Cpu className="w-4 h-4 text-indigo-400" /> Score Proof
+      </h3>
+    </InfoTooltip>
+    
+    <div className="bg-zinc-950 rounded-xl p-4 font-mono text-xs border border-zinc-800/50 shadow-inner flex-1 flex flex-col overflow-hidden">
+      <div className="space-y-3 flex-1 overflow-y-auto">
+        {mainReport.score_breakdown.map((log, i) => {
+          const isPenalty = log.includes('[-');
+          const isBase = log.includes('Base') || log.includes('[+0]');
+          return (
+            <div key={i} className={`flex items-start gap-3 leading-relaxed ${isBase ? 'text-zinc-300 font-bold border-b border-zinc-800/50 pb-3 mb-3' : isPenalty ? 'text-rose-400' : 'text-emerald-400'}`}>
+              <span className="shrink-0 text-zinc-500">{isBase ? '>' : isPenalty ? '-' : '+'}</span>
+              <span>{log}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-3 mt-4 border-t border-zinc-800/50 pt-4 text-zinc-200 font-bold text-sm">
+        <span className="shrink-0 text-emerald-500">$</span>
+        <span>FIPS 203 Score = {mainReport.security_score}</span>
+      </div>
+    </div>
+  </div>
+)}
+
+<div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex-1 flex flex-col">
+  <InfoTooltip content="Raw socket data extracted directly from the BoringSSL/OpenSSL negotiation phase during testing." className="mb-5 block">
+    <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+      <Activity className="w-4 h-4 text-purple-400" /> Live Telemetry
+    </h3>
+  </InfoTooltip>
+  
+  <div className="bg-zinc-950 rounded-xl p-4 font-mono text-xs text-zinc-400 mb-6 border border-zinc-800/50 shadow-inner overflow-x-auto" title="Raw Handshake Output">
+    <span className="text-emerald-500 mr-2">$</span>
+    {mainReport.handshake_text}
+  </div>
+
+  <div className="space-y-5 mt-auto">
+    <div>
+      <div className="flex justify-between text-xs font-medium text-zinc-400 mb-2">
+        <InfoTooltip content="Percentage of infrastructure components heavily reliant on legacy elliptic curve cryptography (ECC).">
+          <span className="border-b border-dashed border-zinc-600 pb-0.5">Vulnerability Footprint</span>
+        </InfoTooltip>
+        <span>{mainReport.threat_level}%</span>
+      </div>
+      <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden" title={`${mainReport.threat_level}% Vulnerability`}>
+        <div 
+          className="h-full bg-gradient-to-r from-[#F5A623] to-[#A31127] transition-all duration-1000 ease-out"
+          style={{ width: `${mainReport.threat_level}%` }}
+        />
+      </div>
+    </div>
+
+    <div>
+      <div className="flex justify-between text-xs font-medium text-zinc-400 mb-2">
+        <InfoTooltip content="Percentage of load balancers and front-end gateways successfully upgraded to support hybrid Key Encapsulation Mechanisms (KEMs).">
+          <span className="border-b border-dashed border-zinc-600 pb-0.5">PQC Architecture Readiness</span>
+        </InfoTooltip>
+        <span>{mainReport.readiness}%</span>
+      </div>
+      <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden" title={`${mainReport.readiness}% Ready`}>
+        <div 
+          className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-1000 ease-out"
+          style={{ width: `${mainReport.readiness}%` }}
+        />
+      </div>
+    </div>
+  </div>
+</div>
                 </div>
               </div>
             </div>

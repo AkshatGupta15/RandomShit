@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AkshatGupta15/RandomShit/backend/internal/core/scanner"
 	"github.com/AkshatGupta15/RandomShit/backend/internal/db"
 	"github.com/AkshatGupta15/RandomShit/backend/internal/models"
 	"github.com/gofiber/fiber/v2"
@@ -43,7 +44,7 @@ type Component struct {
 	CryptoProperties CryptoProps `json:"cryptoProperties,omitempty"`
 }
 
-//  ENHANCED: CycloneDX 1.6 PQC Fields added
+// ENHANCED: CycloneDX 1.6 PQC Fields added
 type CryptoProps struct {
 	AssetType              string `json:"assetType"`
 	Type                   string `json:"type,omitempty"`
@@ -66,19 +67,64 @@ type CryptoProps struct {
 func GenerateCBOM(c *fiber.Ctx) error {
 	domainID := c.Params("domainId")
 
+	// 1. Fetch the Root Domain (No nested preloads to avoid GORM silent failures)
 	var domain models.Domain
-	if err := db.DB.Preload("Subdomains.SSLCert").First(&domain, domainID).Error; err != nil {
+	if err := db.DB.First(&domain, domainID).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Domain not found"})
 	}
 
+	// 2. Initialize the Base CBOM
 	cbom := buildBaseCBOM(fmt.Sprintf("urn:uuid:pnb-pqc-domain-%s", domainID), domain.DomainName)
 
-	for _, sub := range domain.Subdomains {
+	// 3. Scan the Root Domain dynamically and add it as the first component
+	rootReport := scanner.PerformDeepTLSScan(domain.DomainName, "")
+
+	rootIsFips := rootReport.IsPQCEnabled
+	rootSecLevel := "Legacy (Vulnerable)"
+	rootClassSecLevel := 112 // Default RSA 2048 level
+	rootParamSet := ""
+	rootAlgorithm := rootReport.DetectedAlgorithm
+
+	if rootIsFips {
+		rootSecLevel = "NIST FIPS 203 (ML-KEM) Compliant"
+		rootClassSecLevel = 128
+		rootParamSet = "ML-KEM-768"
+		rootAlgorithm = "ML-KEM"
+	}
+
+	rootComponent := Component{
+		Type:        "cryptographic-asset",
+		Name:        domain.DomainName, // The Root Domain
+		Version:     rootReport.TLSVersion,
+		Description: "Root Domain Endpoint",
+		CryptoProperties: CryptoProps{
+			AssetType:              "protocol",
+			Type:                   "tls",
+			Primitive:              "kem",
+			Algorithm:              rootAlgorithm,
+			ParameterSetIdentifier: rootParamSet,
+			ClassicalSecurityLevel: rootClassSecLevel,
+			SecurityLevel:          rootSecLevel,
+			NistFipsCompliant:      rootIsFips,
+			ExecutionEnvironment:   "software",
+			State:                  "active",
+		},
+	}
+
+	// Prepend the root domain to the components array
+	cbom.Components = append(cbom.Components, rootComponent)
+
+	// 4. 🟢 BULLETPROOF FETCH: Query Subdomains Directly 🟢
+	var subdomains []models.Subdomain
+	db.DB.Where("domain_id = ?", domain.ID).Preload("SSLCert").Find(&subdomains)
+
+	for _, sub := range subdomains {
 		if sub.SSLCert != nil {
 			cbom.Components = append(cbom.Components, buildComponent(sub))
 		}
 	}
 
+	// 5. Return the formatted JSON file
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"cbom_%s.json\"", domain.DomainName))
 	c.Set("Content-Type", "application/json")
 	return c.JSON(cbom)
