@@ -11,9 +11,10 @@ type Subdomain struct {
 
 	Domain *Domain `gorm:"foreignKey:DomainID" json:"domain,omitempty"`
 
-	Hostname  string `gorm:"uniqueIndex;not null" json:"hostname"`
-	IPAddress string `gorm:"index" json:"ip_address"`
-	IsAlive   bool   `gorm:"default:false" json:"is_alive"`
+	Hostname   string `gorm:"uniqueIndex;not null" json:"hostname"`
+	IPAddress  string `gorm:"index" json:"ip_address"`
+	IsAlive    bool   `gorm:"default:false" json:"is_alive"`
+	ScanStatus string `gorm:"index;default:'queued'" json:"scan_status"`
 
 	// Child Relationships
 	Services []Service       `gorm:"foreignKey:SubdomainID;constraint:OnDelete:CASCADE;" json:"services,omitempty"`

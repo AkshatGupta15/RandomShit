@@ -43,10 +43,19 @@ interface Domain {
 }
 
 interface ScanStatus {
-  status: 'idle' | 'scanning' | 'completed' | 'stopped'
+  status: 'idle' | 'root_scanning' | 'awaiting_subdomain' | 'subdomain_scanning' | 'completed' | 'stopped'
   percentage: number
   scanned_assets: number
   total_assets: number
+}
+
+interface RootScanReport {
+  hostname?: string
+  detected_algorithm?: string
+  tls_version?: string
+  security_score?: number
+  cert_issuer?: string
+  handshake_text?: string
 }
 
 interface DiscoveredAsset {
@@ -78,6 +87,7 @@ export default function ScannerPage() {
     scanned_assets: 0,
     total_assets: 0,
   })
+  const [rootScanReport, setRootScanReport] = useState<RootScanReport | null>(null)
   const [discoveredAssets, setDiscoveredAssets] = useState<DiscoveredAsset[]>([])
   const [isStarting, setIsStarting] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
@@ -114,7 +124,7 @@ export default function ScannerPage() {
     if (!selectedDomainId) return
 
     try {
-      const response = await api.getDiscoveryFeed(selectedDomainId, 20)
+      const response = await api.getDiscoveryFeed(selectedDomainId, 200)
       const rows = Array.isArray((response as { data?: unknown })?.data)
         ? ((response as { data?: DiscoveryFeedItem[] }).data ?? [])
         : []
@@ -152,7 +162,7 @@ export default function ScannerPage() {
 
   // Poll scan status when scanning
   const pollScanStatus = useCallback(async () => {
-    if (!selectedDomainId || scanStatus.status !== 'scanning') return
+    if (!selectedDomainId || scanStatus.status !== 'subdomain_scanning') return
 
     try {
       const status = await api.getScanStatus(selectedDomainId)
@@ -162,11 +172,54 @@ export default function ScannerPage() {
       const totalAssets = toNumber((status as { total_assets?: unknown; totalEndpoints?: unknown }).total_assets ?? (status as { total_assets?: unknown; totalEndpoints?: unknown }).totalEndpoints, 0)
 
       setScanStatus({
-        status: (status as { status?: string }).status === 'completed' ? 'completed' : 'scanning',
+        status: (status as { status?: string }).status === 'completed' ? 'completed' : 'subdomain_scanning',
         percentage,
         scanned_assets: scannedAssets,
         total_assets: totalAssets,
       })
+
+      const subdomains = Array.isArray((status as { subdomains?: unknown[] }).subdomains)
+        ? ((status as { subdomains?: Array<Record<string, unknown>> }).subdomains ?? [])
+        : []
+
+      const doneAssets: DiscoveredAsset[] = subdomains
+        .filter((item) => String(item.scan_status ?? '').toLowerCase() === 'completed')
+        .map((item, index) => {
+          const sslCert = (item.ssl_cert as Record<string, unknown> | null | undefined) ?? null
+          const services = Array.isArray(item.services) ? item.services : []
+
+          let type: DiscoveredAsset['type'] = 'domain'
+          if (sslCert) type = 'ssl'
+          else if (services.length > 0) type = 'software'
+          else if (typeof item.ip_address === 'string' && item.ip_address.trim()) type = 'ip'
+
+          let assetStatus: DiscoveredAsset['status'] = 'standard'
+          const risk = String(sslCert?.risk_label ?? '').toLowerCase()
+          const tier = String(sslCert?.pqc_tier ?? '').toLowerCase()
+          if (risk.includes('critical') || risk.includes('high') || tier.includes('critical')) {
+            assetStatus = 'critical'
+          } else if (tier.includes('legacy')) {
+            assetStatus = 'legacy'
+          } else if (tier.includes('quantum safe') || tier.includes('elite')) {
+            assetStatus = 'elite'
+          }
+
+          const rawTs = (item.updated_at as string | undefined) || (item.created_at as string | undefined)
+          const parsedTimestamp = rawTs ? new Date(rawTs) : new Date()
+          const timestamp = Number.isNaN(parsedTimestamp.getTime()) ? new Date() : parsedTimestamp
+
+          return {
+            id: Number(item.id ?? index),
+            name: typeof item.hostname === 'string' && item.hostname.trim() ? item.hostname : 'unknown-asset',
+            type,
+            status: assetStatus,
+            timestamp,
+          }
+        })
+
+      if (doneAssets.length > 0) {
+        setDiscoveredAssets(doneAssets)
+      }
 
       if ((status as { status?: string }).status === 'completed' || percentage >= 100) {
         setScanStatus(prev => ({ ...prev, status: 'completed' }))
@@ -177,7 +230,7 @@ export default function ScannerPage() {
   }, [selectedDomainId, scanStatus.status])
 
   useEffect(() => {
-    if (scanStatus.status === 'scanning') {
+    if (scanStatus.status === 'subdomain_scanning') {
       const interval = setInterval(pollScanStatus, 2000)
       return () => clearInterval(interval)
     }
@@ -193,7 +246,7 @@ export default function ScannerPage() {
   }, [selectedDomainId, pollDiscoveryFeed])
 
   useEffect(() => {
-    if (scanStatus.status !== 'scanning') return
+    if (scanStatus.status !== 'subdomain_scanning') return
 
     const interval = setInterval(() => {
       void pollDiscoveryFeed()
@@ -202,21 +255,53 @@ export default function ScannerPage() {
     return () => clearInterval(interval)
   }, [scanStatus.status, pollDiscoveryFeed])
 
+  const handleStartSubdomainScan = async (domainId: number) => {
+    setDiscoveredAssets([])
+    await api.startSubdomainScan(domainId)
+    setScanStatus({
+      status: 'subdomain_scanning',
+      percentage: 0,
+      scanned_assets: 0,
+      total_assets: 0,
+    })
+  }
+
   const handleStartScan = async () => {
     if (!selectedDomainId) return
 
+    const selected = domains.find((d) => d.id === selectedDomainId)
+    const targetDomain = selected?.domain_name || selected?.domain || ''
+    if (!targetDomain) return
+
     setIsStarting(true)
     setDiscoveredAssets([])
+    setRootScanReport(null)
+    setScanStatus(prev => ({ ...prev, status: 'root_scanning', percentage: 15 }))
+
     try {
-      await api.startScan(selectedDomainId)
+      const rootResponse = await api.startRootScan(targetDomain)
+      const domainIdFromResponse = toNumber((rootResponse as { domain_id?: unknown }).domain_id, selectedDomainId)
+      setSelectedDomainId(domainIdFromResponse)
+
+      const report = ((rootResponse as { main_report?: RootScanReport }).main_report ?? null)
+      setRootScanReport(report)
+
       setScanStatus({
-        status: 'scanning',
-        percentage: 0,
+        status: 'awaiting_subdomain',
+        percentage: 100,
         scanned_assets: 0,
-        total_assets: 40,
+        total_assets: 0,
       })
+
+      const shouldRunSubdomains = window.confirm(
+        'Root domain scan is complete. Do you want to continue with subdomain discovery and pipeline analysis?'
+      )
+      if (shouldRunSubdomains) {
+        await handleStartSubdomainScan(domainIdFromResponse)
+      }
     } catch (error) {
       console.error('Failed to start scan:', error)
+      setScanStatus(prev => ({ ...prev, status: 'idle', percentage: 0 }))
     } finally {
       setIsStarting(false)
     }
@@ -237,7 +322,7 @@ export default function ScannerPage() {
   }
 
   const selectedDomain = domains?.find(d => d.id === selectedDomainId)
-  const isScanning = scanStatus.status === 'scanning'
+  const isScanning = scanStatus.status === 'root_scanning' || scanStatus.status === 'subdomain_scanning'
 
   const getAssetIcon = (type: string) => {
     switch (type) {
@@ -307,7 +392,7 @@ export default function ScannerPage() {
               <Select
                 value={selectedDomainId?.toString() || ''}
                 onValueChange={(value) => setSelectedDomainId(Number(value))}
-                disabled={isScanning}
+                disabled={scanStatus.status === 'subdomain_scanning'}
               >
                 <SelectTrigger className="flex-1 bg-secondary/50 border-border/50">
                   <SelectValue placeholder="Select a domain to scan" />
@@ -330,20 +415,7 @@ export default function ScannerPage() {
                 </SelectContent>
               </Select>
 
-              {!isScanning ? (
-                <Button
-                  onClick={handleStartScan}
-                  disabled={!selectedDomainId || isStarting}
-                  className="gap-2 bg-pnb-maroon hover:bg-pnb-maroon-dark border border-pnb-gold/30 px-6"
-                >
-                  {isStarting ? (
-                    <Spinner className="h-4 w-4" />
-                  ) : (
-                    <Play className="h-4 w-4" />
-                  )}
-                  Start Scan
-                </Button>
-              ) : (
+              {scanStatus.status === 'subdomain_scanning' ? (
                 <Button
                   onClick={handleStopScan}
                   disabled={isStopping}
@@ -356,6 +428,28 @@ export default function ScannerPage() {
                     <Square className="h-4 w-4" />
                   )}
                   Stop
+                </Button>
+              ) : scanStatus.status === 'awaiting_subdomain' ? (
+                <Button
+                  onClick={() => selectedDomainId && void handleStartSubdomainScan(selectedDomainId)}
+                  disabled={!selectedDomainId || isStarting}
+                  className="gap-2 bg-pnb-maroon hover:bg-pnb-maroon-dark border border-pnb-gold/30 px-6"
+                >
+                  <Play className="h-4 w-4" />
+                  Scan Subdomains
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleStartScan}
+                  disabled={!selectedDomainId || isStarting}
+                  className="gap-2 bg-pnb-maroon hover:bg-pnb-maroon-dark border border-pnb-gold/30 px-6"
+                >
+                  {isStarting ? (
+                    <Spinner className="h-4 w-4" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                  Run Root Scan
                 </Button>
               )}
             </div>
@@ -432,6 +526,30 @@ export default function ScannerPage() {
               </div>
             </div>
           </div>
+
+          {rootScanReport && (
+            <div className="glass rounded-xl p-6 border border-border/50">
+              <h3 className="text-sm font-medium text-muted-foreground mb-4">Root Domain Analysis</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <p className="text-xs text-muted-foreground mb-1">Algorithm</p>
+                  <p className="font-mono text-foreground">{rootScanReport.detected_algorithm || 'Unknown'}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <p className="text-xs text-muted-foreground mb-1">TLS Version</p>
+                  <p className="font-mono text-foreground">{rootScanReport.tls_version || 'Unknown'}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <p className="text-xs text-muted-foreground mb-1">Security Score</p>
+                  <p className="font-mono text-pnb-gold">{toNumber(rootScanReport.security_score, 0)}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary/30">
+                  <p className="text-xs text-muted-foreground mb-1">Issuer</p>
+                  <p className="font-mono text-foreground truncate">{rootScanReport.cert_issuer || 'Unknown'}</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </motion.div>
 

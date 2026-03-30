@@ -62,6 +62,17 @@ export default function DashboardPage() {
     { refreshInterval: 5000 }
   )
 
+  const normalizedRiskData = (riskData || []).map((item) => ({
+    name: item.name,
+    value: item.value ?? item.count ?? 0,
+  }))
+
+  const normalizedExpiryData = (expiryData || []).map((item) => ({
+    name: item.name,
+    count: item.count ?? item.value ?? 0,
+    fill: item.fill,
+  }))
+
   // Fallback simple KPI Card in case your imported one is broken
   const SimpleKPICard = ({ title, value, icon: Icon, color }: any) => (
     <div className="glass rounded-xl p-6 border border-border/50 flex flex-col justify-between">
@@ -140,11 +151,11 @@ export default function DashboardPage() {
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {riskLoading ? <ChartSkeleton className="lg:col-span-1" /> : (
-          <RiskDistributionChart data={riskData || []} className="lg:col-span-1" />
+          <RiskDistributionChart data={normalizedRiskData} className="lg:col-span-1" />
         )}
 
         {expiryLoading ? <ChartSkeleton className="lg:col-span-1" /> : (
-          <ExpiryTimelineChart data={expiryData || []} className="lg:col-span-1" />
+          <ExpiryTimelineChart data={normalizedExpiryData} className="lg:col-span-1" />
         )}
 
         <PQCScoreGauge score={kpis?.pqc_score || 0} className="lg:col-span-1" />

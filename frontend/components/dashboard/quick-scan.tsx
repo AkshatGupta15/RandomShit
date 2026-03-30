@@ -1,7 +1,21 @@
 'use client'
 
-import { useState } from 'react'
-import { Search, Loader2, ShieldCheck, Cpu, Lock, TriangleAlert, Zap, Share2, RefreshCw, Activity, Globe } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { 
+  Search, Loader2, ShieldCheck, Cpu, Lock, TriangleAlert, Zap,
+  Activity, Globe, Download, CheckCircle2, Radar, Target
+} from 'lucide-react'
+import { toast } from 'sonner' 
+import { api } from '@/lib/api'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+
+// Maps exactly to the EnrichedPQCReport from your Go backend
 interface EnrichedPQCReport {
   hostname: string
   is_pqc_enabled: boolean
@@ -17,73 +31,262 @@ interface EnrichedPQCReport {
   legacy_weaknesses: string[]
 }
 
+// Maps to the Subdomain models returned by your CheckScanStatus API
+interface SubdomainReport {
+  hostname: string
+  detected_algorithm: string
+  tls_version: string
+  issuer: string
+  security_score: number
+  is_pqc_enabled: boolean
+}
+
+type ScanPhase = 'idle' | 'root_scanning' | 'root_completed' | 'sub_scanning' | 'sub_completed'
+
 export default function QuickScanWidget() {
-  const [domain, setDomain] = useState('')
-  const [isScanning, setIsScanning] = useState(false)
-  const [result, setResult] = useState<EnrichedPQCReport | null>(null)
+  const [domainInput, setDomainInput] = useState('')
+  const [activeDomainId, setActiveDomainId] = useState<number | null>(null)
+  const [scanPhase, setScanPhase] = useState<ScanPhase>('idle')
+  
+  const [mainReport, setMainReport] = useState<EnrichedPQCReport | null>(null)
+  const [subdomains, setSubdomains] = useState<SubdomainReport[]>([])
+  const [progress, setProgress] = useState({ scanned: 0, total: 0 })
+  const [selectedSubdomain, setSelectedSubdomain] = useState<SubdomainReport | null>(null)
 
-  const handleScan = async (e?: React.FormEvent) => {
+  const parseDomainId = (payload: any): number | null => {
+    const direct = payload?.domain_id ?? payload?.domainId ?? payload?.domain?.id
+    const parsed = Number(direct)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }
+
+  // 🟢 Phase 1: Scan Root Domain Instantly
+  const handleStartRootScan = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
-    if (!domain.trim()) return
+    if (!domainInput.trim()) return
 
-    setIsScanning(true)
-    setResult(null)
+    setScanPhase('root_scanning')
+    setMainReport(null)
+    setSubdomains([])
+    setActiveDomainId(null)
+    setProgress({ scanned: 0, total: 0 })
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/scan/quick`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain: domain.trim() })
+      const data = await api.startRootScan(domainInput.trim())
+      const normalizedDomain = domainInput.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '')
+
+      let resolvedDomainId = parseDomainId(data)
+      if (!resolvedDomainId) {
+        const domains = await api.getDomains()
+        const match = domains.find((d: any) => {
+          const value = String(d?.domain_name || d?.domain || '').toLowerCase().replace(/^www\./, '')
+          return value === normalizedDomain
+        })
+        if (match) {
+          const parsed = Number(match.id)
+          if (Number.isFinite(parsed) && parsed > 0) {
+            resolvedDomainId = parsed
+          }
+        }
+      }
+      
+      setMainReport(data.main_report)
+      setActiveDomainId(resolvedDomainId)
+      setScanPhase('root_completed')
+
+      if (!resolvedDomainId) {
+        toast.error('Root scan succeeded but no domain id was returned. Please add the domain in inventory and try again.')
+      }
+      
+      toast.success(`Root Analysis Complete`, {
+        description: `Domain ${domainInput} has been verified.`,
+        icon: <ShieldCheck className="text-green-500" />
       })
-      const data = await res.json()
-      setResult(data)
+      
     } catch (error) {
-      console.error("Scan failed", error)
-    } finally {
-      setIsScanning(false)
+      toast.error("Failed to initiate scan. Is the backend running?")
+      setScanPhase('idle')
     }
   }
 
+  // 🟢 Phase 2: User Authorizes Deep Subdomain OSINT Scan
+  const handleLaunchSubdomainScan = async () => {
+    if (!activeDomainId) {
+      toast.error('Cannot start subdomain scan: missing domain id from root scan response.')
+      return
+    }
+
+    setScanPhase('sub_scanning')
+    toast.info("OSINT Pipeline Launched", {
+      description: "Discovering and analyzing infrastructure...",
+      icon: <Radar className="text-purple-400" />
+    })
+
+    try {
+      await api.startSubdomainScan(activeDomainId)
+      // The useEffect polling will take over from here to watch the background worker
+    } catch (error) {
+      toast.error("Failed to launch subdomain scanner.")
+      setScanPhase('root_completed')
+    }
+  }
+
+  // 🟢 Phase 3: Poll for Background Progress
+  useEffect(() => {
+    let interval: NodeJS.Timeout
+
+    if (activeDomainId && scanPhase === 'sub_scanning') {
+      interval = setInterval(async () => {
+        try {
+          const data = await api.getScanStatus(activeDomainId)
+
+          // Track live numerical progress
+          const scanned = data.scanned_assets || data.ScannedAssets || 0
+          const total = data.total_assets || data.TotalAssets || 0
+          setProgress({ scanned, total })
+
+          // Map the incoming database structures safely (handling casing differences)
+          const formattedSubs = (data.subdomains || [])
+            .filter((sub: any) => sub.ssl_cert || sub.SSLCert)
+            .map((sub: any) => {
+              const cert = sub.ssl_cert || sub.SSLCert
+              return {
+                hostname: sub.hostname || sub.Hostname,
+                detected_algorithm: cert.key_length || cert.KeyLength || "Unknown",
+                tls_version: cert.tls_version || cert.TLSVersion || "Unknown",
+                issuer: cert.issuer || cert.Issuer || 'Unknown',
+                security_score: cert.q_score || cert.QScore || 0,
+                is_pqc_enabled: (cert.q_score || cert.QScore || 0) >= 80,
+              }
+            })
+
+          const uniqueByHostname = new Map<string, SubdomainReport>()
+          for (const item of formattedSubs) {
+            if (item.hostname && !uniqueByHostname.has(item.hostname)) {
+              uniqueByHostname.set(item.hostname, item)
+            }
+          }
+
+          setSubdomains(Array.from(uniqueByHostname.values()))
+
+          // Finish the scan
+          if (data.status === 'completed' || data.status === 'halted') {
+            setScanPhase('sub_completed')
+            toast.success('OSINT Pipeline Complete!', {
+              description: `Successfully discovered and analyzed ${formattedSubs.length} live endpoints.`,
+              icon: <CheckCircle2 className="text-green-500" />
+            })
+          }
+        } catch (error) {
+          console.error("Polling error", error)
+        }
+      }, 2000) // 2-second polling for smooth progress bars
+    }
+
+    return () => clearInterval(interval)
+  }, [activeDomainId, scanPhase])
+
+  const downloadCBOM = () => {
+    if (!mainReport) return;
+    const cbomData = {
+      bomFormat: "CycloneDX-Crypto",
+      specVersion: "1.5",
+      serialNumber: `urn:uuid:${crypto.randomUUID()}`,
+      version: 1,
+      metadata: {
+        timestamp: new Date().toISOString(),
+        tools: [{ vendor: "PNB Quantum Shield", name: "Enterprise OSINT Engine", version: "2.0.0" }],
+        targetDomain: domainInput
+      },
+      components: [
+        {
+          type: "cryptographic-asset",
+          name: mainReport.hostname,
+          cryptoProperties: {
+            protocol: mainReport.tls_version,
+            keyExchange: mainReport.detected_algorithm,
+            quantumSafe: mainReport.is_pqc_enabled,
+            securityScore: mainReport.security_score,
+            vulnerabilities: mainReport.legacy_weaknesses
+          }
+        },
+        ...subdomains.map(sub => ({
+          type: "cryptographic-asset",
+          name: sub.hostname,
+          cryptoProperties: {
+            protocol: sub.tls_version,
+            keyExchange: sub.detected_algorithm,
+            quantumSafe: sub.is_pqc_enabled,
+            securityScore: sub.security_score,
+          }
+        }))
+      ]
+    }
+    const blob = new Blob([JSON.stringify(cbomData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `CBOM_${domainInput}_${new Date().getTime()}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const progressPercent = progress.total > 0 ? Math.round((progress.scanned / progress.total) * 100) : 0
+  const isScanning = scanPhase === 'root_scanning' || scanPhase === 'sub_scanning'
+  const safeSubdomains = subdomains.filter((sub) => sub.is_pqc_enabled).length
+
   return (
     <div className="space-y-6 w-full max-w-6xl mx-auto">
-      
       {/* Search Input Area */}
       <div className="bg-[#0f1219] p-6 rounded-2xl border border-white/5 shadow-2xl">
-        <h2 className="text-xl font-bold text-white mb-2">Verification Engine</h2>
-        <p className="text-white/50 text-sm mb-4">Execute a live TLS handshake to verify NIST PQC compliance.</p>
-        <form onSubmit={handleScan} className="flex gap-3">
+        <h2 className="text-xl font-bold text-white mb-2">Enterprise Verification Engine</h2>
+        <p className="text-white/50 text-sm mb-4">Execute live NIST FIPS 203 handshakes across the root domain and dynamically discovered subdomains.</p>
+        <form onSubmit={handleStartRootScan} className="flex gap-3 mt-4">
           <div className="relative flex-1">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
             <input 
               type="text" 
-              placeholder="crypto.cloudflare.com"
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
+              placeholder="e.g., targetdomain.com"
+              value={domainInput}
+              onChange={(e) => setDomainInput(e.target.value)}
               className="w-full bg-[#161b22] border border-white/10 text-white rounded-xl pl-11 pr-4 py-3 focus:outline-none focus:border-blue-500 transition-colors font-mono text-sm"
               disabled={isScanning}
             />
           </div>
           <button 
             type="submit"
-            disabled={isScanning || !domain}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2"
+            disabled={isScanning || !domainInput}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2 disabled:opacity-50 min-w-[180px] justify-center"
           >
-            {isScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-            {isScanning ? 'Verifying...' : 'Scan Target'}
+            {scanPhase === 'root_scanning' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+            {scanPhase === 'root_scanning' ? 'Analyzing Root...' : 'Scan Target'}
           </button>
         </form>
       </div>
 
-      {/* Results Dashboard (Matches Screenshot) */}
-      {result && (
-        <div className="bg-[#0f1219] rounded-2xl border border-white/5 p-8 shadow-2xl text-white">
+      {/* Main Results Dashboard */}
+      {mainReport && (
+        <div className="bg-[#0f1219] rounded-2xl border border-white/5 p-8 shadow-2xl text-white animate-in fade-in slide-in-from-bottom-4 duration-500">
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+            <div className="rounded-xl border border-white/10 bg-[#161b22] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-white/50">Selected Domain</p>
+              <p className="mt-1 text-sm font-mono text-white/90 truncate">{mainReport.hostname}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-[#161b22] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-white/50">Subdomains Analyzed</p>
+              <p className="mt-1 text-lg font-semibold text-white">{subdomains.length}</p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-[#161b22] p-3">
+              <p className="text-[11px] uppercase tracking-wide text-white/50">PQC Safe Subdomains</p>
+              <p className="mt-1 text-lg font-semibold text-green-400">{safeSubdomains}</p>
+            </div>
+          </div>
           
-          {/* Header */}
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
             <div>
               <div className="flex items-center gap-4 mb-2">
-                <h1 className="text-3xl font-bold">Verification Results</h1>
-                {result.is_pqc_enabled ? (
+                <h1 className="text-3xl font-bold">Root Domain Results</h1>
+                {mainReport.is_pqc_enabled ? (
                   <span className="flex items-center gap-1.5 px-3 py-1 border border-[#4ade80]/30 text-[#4ade80] bg-[#4ade80]/10 rounded-full text-xs font-bold tracking-wider">
                     <ShieldCheck className="w-4 h-4" /> PQC ENABLED
                   </span>
@@ -94,98 +297,79 @@ export default function QuickScanWidget() {
                 )}
               </div>
               <p className="text-white/40 font-mono text-sm flex items-center gap-2">
-                <Globe className="w-4 h-4" /> https://{result.hostname}
+                <Globe className="w-4 h-4" /> https://{mainReport.hostname}
               </p>
             </div>
             
             <div className="flex gap-3">
-              <button className="flex items-center gap-2 bg-[#1c212b] hover:bg-[#252b36] border border-white/10 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all">
-                <Share2 className="w-4 h-4" /> SHARE RESULTS
-              </button>
-              <button onClick={() => handleScan()} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all">
-                <RefreshCw className="w-4 h-4" /> RE-SCAN TARGET
+              <button 
+                onClick={downloadCBOM}
+                disabled={isScanning}
+                className="flex items-center gap-2 bg-[#1c212b] hover:bg-[#252b36] border border-white/10 px-4 py-2.5 rounded-lg text-sm font-semibold text-yellow-500 transition-all disabled:opacity-50"
+              >
+                <Download className="w-4 h-4" /> EXPORT CBOM
               </button>
             </div>
           </div>
 
-          {/* Top 5 Metric Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+          {/* Metric Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider">Detected<br/>Algorithm</span>
-                <Cpu className="w-4 h-4 text-blue-400" />
+              <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
+                <Cpu className="w-3 h-3 text-blue-400" /> Detected Algorithm
+              </span>
+              <div className={`font-bold text-lg font-mono truncate ${mainReport.detected_algorithm === 'OFFLINE' ? 'text-red-500' : 'text-white'}`}>
+                {mainReport.detected_algorithm}
               </div>
-              <div className="font-bold text-lg font-mono truncate">{result.detected_algorithm}</div>
-              <div className="text-white/40 text-xs mt-1">Active handshake mechanism.</div>
-            </div>
-
-            <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider">TLS Version</span>
-                <Lock className="w-4 h-4 text-cyan-400" />
-              </div>
-              <div className="font-bold text-2xl">{result.tls_version}</div>
-              <div className="text-white/40 text-xs mt-1">Current transport protocol.</div>
-            </div>
-
-            <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl relative overflow-hidden">
-              <div className="flex justify-between items-start mb-2 relative z-10">
-                <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider">Q-Day Risk</span>
-                <TriangleAlert className="w-4 h-4 text-red-400" />
-              </div>
-              <div className="font-bold text-3xl text-red-400 relative z-10">{result.q_day_risk}%</div>
-              <div className="text-white/40 text-xs mt-1 relative z-10">Shor's Algorithm vulnerability.</div>
             </div>
 
             <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider">Security<br/>Score</span>
-                <ShieldCheck className="w-4 h-4 text-green-400" />
-              </div>
-              <div className={`font-bold text-3xl ${result.security_score > 70 ? 'text-[#4ade80]' : 'text-yellow-400'}`}>
-                {result.security_score}/100
-              </div>
-              <div className="text-white/40 text-xs mt-1">NIST standard alignment.</div>
+              <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
+                <Lock className="w-3 h-3 text-cyan-400" /> Protocol
+              </span>
+              <div className="font-bold text-2xl">{mainReport.tls_version}</div>
             </div>
 
-            <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl opacity-70">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider">QKD Status</span>
-                <Zap className="w-4 h-4 text-white/40" />
+            <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl">
+              <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
+                <TriangleAlert className="w-3 h-3 text-red-400" /> Q-Day Risk
+              </span>
+              <div className="font-bold text-3xl text-red-400">{mainReport.q_day_risk}%</div>
+            </div>
+
+            <div className="bg-[#161b22] border border-white/5 p-5 rounded-xl">
+              <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
+                <ShieldCheck className="w-3 h-3 text-green-400" /> Security Score
+              </span>
+              <div className={`font-bold text-3xl ${mainReport.security_score > 70 ? 'text-[#4ade80]' : 'text-yellow-400'}`}>
+                {mainReport.security_score}/100
               </div>
-              <div className="font-bold text-lg">{result.qkd_status}</div>
-              <div className="text-white/40 text-xs mt-1">Quantum Key Distribution</div>
             </div>
           </div>
 
-          {/* Bottom Section: 2 Columns */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Left: Handshake Breakdown */}
+          {/* Details Section: Handshake & Roadmaps */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <div className="lg:col-span-2 bg-[#161b22] border border-white/5 rounded-xl p-6">
               <h3 className="text-white font-bold flex items-center gap-2 mb-6">
                 <Activity className="w-5 h-5 text-blue-400" /> Handshake Breakdown
               </h3>
               
               <div className="bg-[#0a0d14] border border-white/5 p-4 rounded-lg font-mono text-sm text-blue-300 mb-8 leading-relaxed">
-                {result.handshake_text}
+                {mainReport.handshake_text}
               </div>
 
-              {/* Progress Bars */}
               <div className="space-y-6 px-4">
                 <div className="flex items-center gap-4">
                   <div className="w-24 text-xs text-white/50 text-right">Threat Level</div>
                   <div className="flex-1 h-8 bg-[#0a0d14] rounded overflow-hidden relative">
-                    {/* Vertical grid lines for aesthetic */}
                     <div className="absolute inset-0 flex justify-between px-1/4">
                       <div className="w-px h-full bg-white/5 border-l border-dashed border-white/10"></div>
                       <div className="w-px h-full bg-white/5 border-l border-dashed border-white/10"></div>
                       <div className="w-px h-full bg-white/5 border-l border-dashed border-white/10"></div>
                     </div>
-                    {/* The Fill Bar */}
                     <div 
                       className="h-full bg-red-500 rounded relative z-10 transition-all duration-1000 ease-out"
-                      style={{ width: `${result.threat_level}%` }}
+                      style={{ width: `${mainReport.threat_level}%` }}
                     />
                   </div>
                 </div>
@@ -200,52 +384,191 @@ export default function QuickScanWidget() {
                     </div>
                     <div 
                       className="h-full bg-[#4ade80] rounded relative z-10 transition-all duration-1000 ease-out"
-                      style={{ width: `${result.readiness}%` }}
+                      style={{ width: `${mainReport.readiness}%` }}
                     />
-                  </div>
-                  {/* Axis labels */}
-                  <div className="absolute bottom-4 left-[120px] right-6 flex justify-between text-[10px] text-white/30">
-                    <span>0</span>
-                    <span>25</span>
-                    <span>50</span>
-                    <span>75</span>
-                    <span>100</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Right: Roadmap & Weaknesses */}
             <div className="space-y-6">
-              
-              <div className="bg-[#161b22] border border-white/5 rounded-xl p-6">
+              <div className="bg-[#161b22] border border-white/5 rounded-xl p-6 h-full">
                 <h3 className="text-cyan-400 font-bold mb-4 text-sm">Hardening Roadmap</h3>
-                <ul className="space-y-4">
-                  {result.hardening_roadmap.map((item, idx) => (
+                <ul className="space-y-4 mb-6">
+                  {mainReport.hardening_roadmap.map((item, idx) => (
                     <li key={idx} className="flex items-start gap-3 text-sm text-white/80">
                       <ShieldCheck className="w-4 h-4 text-cyan-400 mt-0.5 shrink-0" />
                       <span>{item}</span>
                     </li>
                   ))}
+                  {mainReport.hardening_roadmap.length === 0 && (
+                    <li className="text-white/40 text-xs italic">No actions required.</li>
+                  )}
                 </ul>
-              </div>
 
-              <div className="bg-[#161b22] border border-white/5 rounded-xl p-6">
                 <h3 className="text-orange-400 font-bold mb-4 text-sm">Legacy Weaknesses</h3>
                 <div className="flex flex-wrap gap-2">
-                  {result.legacy_weaknesses.map((item, idx) => (
+                  {mainReport.legacy_weaknesses.map((item, idx) => (
                     <span key={idx} className="bg-red-500/10 border border-red-500/20 text-red-200 px-3 py-1.5 rounded-md text-xs font-mono">
                       {item}
                     </span>
                   ))}
-                  {result.legacy_weaknesses.length === 0 && (
+                  {mainReport.legacy_weaknesses.length === 0 && (
                     <span className="text-white/40 text-xs italic">No critical legacy weaknesses detected.</span>
                   )}
                 </div>
               </div>
-
             </div>
           </div>
+
+          {/* 🟢 OSINT Trigger CTA Card 🟢 */}
+          {scanPhase === 'root_completed' && (
+            <div className="bg-gradient-to-r from-[#1c212b] to-[#161b22] border border-purple-500/20 rounded-xl p-6 mb-8 flex flex-col md:flex-row items-center justify-between gap-6 animate-in zoom-in-95 duration-300">
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-purple-500/10 rounded-lg shrink-0">
+                  <Radar className="w-6 h-6 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white mb-1">Discover Deep Infrastructure</h3>
+                  <p className="text-white/60 text-sm">
+                    Root domain analysis complete. Deploy OSINT engines to discover and scan all associated subdomains for Post-Quantum readiness.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={handleLaunchSubdomainScan}
+                disabled={!activeDomainId}
+                className="shrink-0 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-900/40 disabled:cursor-not-allowed text-white px-6 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(168,85,247,0.4)]"
+              >
+                <Target className="w-4 h-4" /> Launch Subdomain Scan
+              </button>
+            </div>
+          )}
+
+          {/* 🟢 Subdomain Report Table (Shows ONLY during/after sub scan) 🟢 */}
+          {(scanPhase === 'sub_scanning' || scanPhase === 'sub_completed') && (
+            <div className="bg-[#161b22] border border-white/5 rounded-xl overflow-hidden animate-in slide-in-from-bottom-4 duration-500">
+              
+              <div className="p-5 border-b border-white/5 bg-[#1c212b]">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-white font-bold flex items-center gap-2">
+                    <Radar className="w-5 h-5 text-purple-400" /> Subdomain Scan Results
+                  </h3>
+                  
+                  <div className="text-xs font-mono">
+                    {scanPhase === 'sub_scanning' ? (
+                      progress.total === 0 ? (
+                         <span className="flex items-center gap-2 text-yellow-500">
+                           <Loader2 className="w-3 h-3 animate-spin" /> Gathering OSINT Data...
+                         </span>
+                      ) : (
+                         <span className="flex items-center gap-2 text-blue-400">
+                           <Loader2 className="w-3 h-3 animate-spin" /> Scanning {progress.scanned} / {progress.total} Assets ({progressPercent}%)
+                         </span>
+                      )
+                    ) : (
+                      <span className="text-[#4ade80] flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Complete ({subdomains.length} verified assets)
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {scanPhase === 'sub_scanning' && progress.total > 0 && (
+                  <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className="bg-blue-500 h-full transition-all duration-500 ease-out" 
+                      style={{ width: `${progressPercent}%` }} 
+                    />
+                  </div>
+                )}
+              </div>
+              
+              <div className="overflow-x-auto min-h-[150px]">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-[#0a0d14] text-white/40 text-xs uppercase font-mono">
+                    <tr>
+                      <th className="px-6 py-4">Hostname</th>
+                      <th className="px-6 py-4">Key Exchange</th>
+                      <th className="px-6 py-4">Protocol</th>
+                      <th className="px-6 py-4">PQC Status</th>
+                      <th className="px-6 py-4">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 relative">
+                    {subdomains.length === 0 && scanPhase === 'sub_scanning' && (
+                       <tr>
+                         <td colSpan={5} className="p-8 text-center text-white/40 text-sm font-mono">
+                           Waiting for first response...
+                         </td>
+                       </tr>
+                    )}
+                    {subdomains.map((sub, idx) => (
+                      <tr key={idx} className="hover:bg-white/5 transition-colors animate-in fade-in duration-500">
+                        <td className="px-6 py-4 font-bold text-white/90">{sub.hostname}</td>
+                        <td className="px-6 py-4 font-mono text-[11px] text-white/60">{sub.detected_algorithm}</td>
+                        <td className="px-6 py-4 font-mono text-xs">{sub.tls_version}</td>
+                        <td className="px-6 py-4">
+                          {sub.is_pqc_enabled ? (
+                            <span className="text-[#4ade80] bg-[#4ade80]/10 border border-[#4ade80]/20 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide">PQC Safe</span>
+                          ) : (
+                            <span className="text-[#f87171] bg-[#f87171]/10 border border-[#f87171]/20 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide">Not Safe</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <button
+                            onClick={() => setSelectedSubdomain(sub)}
+                            className="text-xs px-2 py-1 rounded border border-white/20 hover:border-white/40 text-white/80 hover:text-white"
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <Dialog open={!!selectedSubdomain} onOpenChange={(open) => !open && setSelectedSubdomain(null)}>
+            <DialogContent className="bg-[#0f1219] border border-white/10 text-white max-w-xl">
+              <DialogHeader>
+                <DialogTitle>Subdomain Scan Details</DialogTitle>
+                <DialogDescription className="text-white/60">
+                  Deep scan metadata for the selected subdomain under the currently scanned root domain.
+                </DialogDescription>
+              </DialogHeader>
+
+              {selectedSubdomain && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2 text-sm">
+                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3 sm:col-span-2">
+                    <p className="text-[11px] uppercase tracking-wide text-white/50">Hostname</p>
+                    <p className="mt-1 font-mono text-white/90 break-all">{selectedSubdomain.hostname}</p>
+                  </div>
+                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-white/50">TLS Version</p>
+                    <p className="mt-1 text-white/90">{selectedSubdomain.tls_version}</p>
+                  </div>
+                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-white/50">Issuer</p>
+                    <p className="mt-1 text-white/90">{selectedSubdomain.issuer}</p>
+                  </div>
+                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3 sm:col-span-2">
+                    <p className="text-[11px] uppercase tracking-wide text-white/50">Key Exchange / Algorithm</p>
+                    <p className="mt-1 font-mono text-white/90">{selectedSubdomain.detected_algorithm}</p>
+                  </div>
+                  <div className="rounded-lg bg-[#161b22] border border-white/10 p-3 sm:col-span-2">
+                    <p className="text-[11px] uppercase tracking-wide text-white/50">PQC Classification</p>
+                    <p className={selectedSubdomain.is_pqc_enabled ? 'mt-1 text-green-400 font-semibold' : 'mt-1 text-red-400 font-semibold'}>
+                      {selectedSubdomain.is_pqc_enabled ? 'PQC Safe' : 'Not Safe'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
         </div>
       )}
     </div>
