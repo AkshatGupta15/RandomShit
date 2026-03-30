@@ -22,6 +22,7 @@ import {
   PQCScoreGauge,
   ChartSkeleton 
 } from '@/components/dashboard/charts'
+import QuickScanWidget from '@/components/dashboard/quick-scan'
 
 // Updated to match the new robust Go Backend
 interface KPIData {
@@ -121,6 +122,7 @@ export default function DashboardPage() {
         </Alert>
       </motion.div>
 
+            <QuickScanWidget />
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpiLoading ? (

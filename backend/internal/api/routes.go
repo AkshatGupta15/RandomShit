@@ -42,6 +42,7 @@ func SetupRoutes(app *fiber.App) {
 	scan.Get("/status/:domainId", handlers.GetScanProgress) // Real-time % complete for the UI loader
 	scan.Get("/live-topology", handlers.GetLiveTopology)
 	scan.Get("/discovery-feed", handlers.GetDiscoveryFeed)
+	scan.Post("/quick", handlers.RunQuickScan)
 
 	// ==========================================
 	// 5. ROOT DOMAIN MANAGEMENT (The targets)
